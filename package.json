@@ -1,0 +1,25 @@
+{
+  "name": "tribali-liga",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "mobile": "npm --workspace apps/mobile run start",
+    "admin": "npm --workspace apps/admin run dev",
+    "api": "npm --workspace apps/api run dev",
+    "db:schema": "node scripts/apply-supabase-schema.mjs",
+    "db:import:wp": "node scripts/import-wordpress-history.mjs",
+    "db:import:flm": "node scripts/import-flm-full-history.mjs",
+    "build": "npm --workspace apps/admin run build",
+    "check": "npm --workspace apps/admin exec tsc -- --noEmit && npm --workspace apps/mobile exec tsc -- --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.7",
+    "pg": "^8.22.0"
+  }
+}

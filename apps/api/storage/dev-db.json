@@ -1,0 +1,73 @@
+{
+  "users": [
+    {
+      "id": "user-admin",
+      "createdAt": "2026-07-16T19:51:46.821Z",
+      "updatedAt": "2026-07-16T19:51:46.821Z",
+      "email": "admin@urbanfantasy.rs",
+      "displayName": "Urban Fantasy Admin",
+      "role": "admin",
+      "verificationStatus": "approved"
+    }
+  ],
+  "cities": [
+    {
+      "id": "city-novi-sad",
+      "createdAt": "2026-07-16T19:51:46.821Z",
+      "updatedAt": "2026-07-16T19:51:46.821Z",
+      "name": "Novi Sad",
+      "slug": "novi-sad",
+      "isActive": true
+    }
+  ],
+  "competitions": [
+    {
+      "id": "competition-novo-naselje-s2",
+      "createdAt": "2026-07-16T19:51:46.821Z",
+      "updatedAt": "2026-07-16T19:51:46.821Z",
+      "cityId": "city-novi-sad",
+      "name": "Liga Novo naselje",
+      "seasonName": "Sezona 2",
+      "status": "draft"
+    }
+  ],
+  "teams": [],
+  "players": [],
+  "matches": [],
+  "matchLineups": [],
+  "matchEvents": [],
+  "playerMatchStats": [],
+  "fantasyTeams": [],
+  "fantasyTeamPicks": [],
+  "newsPosts": [],
+  "storyFolders": [
+    {
+      "id": "story-novi-sad",
+      "createdAt": "2026-07-16T19:51:46.821Z",
+      "updatedAt": "2026-07-16T19:51:46.821Z",
+      "title": "Novi Sad",
+      "sortOrder": 1,
+      "isActive": true
+    },
+    {
+      "id": "story-zrenjanin",
+      "createdAt": "2026-07-16T19:51:46.821Z",
+      "updatedAt": "2026-07-16T19:51:46.821Z",
+      "title": "Zrenjanin",
+      "sortOrder": 2,
+      "isActive": true
+    },
+    {
+      "id": "story-gameweek",
+      "createdAt": "2026-07-16T19:51:46.821Z",
+      "updatedAt": "2026-07-16T19:51:46.821Z",
+      "title": "Gameweek",
+      "sortOrder": 3,
+      "isActive": true
+    }
+  ],
+  "stories": [],
+  "storyViews": [],
+  "storyLikes": [],
+  "mediaLinks": []
+}

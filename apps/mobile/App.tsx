@@ -1,0 +1,68 @@
+import "react-native-gesture-handler";
+import React from "react";
+import { Platform, StyleSheet, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AuthProvider } from "./src/state/AuthContext";
+import { RootNavigator } from "./src/navigation/RootNavigator";
+
+function AppContent() {
+  return (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <StatusBar style="light" />
+        <RootNavigator />
+      </AuthProvider>
+    </SafeAreaProvider>
+  );
+}
+
+export default function App() {
+  if (Platform.OS !== "web") return <AppContent />;
+
+  // On web, the app is designed phone-only - always render it inside a fixed-width
+  // phone-shaped frame instead of stretching across the full browser window, regardless
+  // of how wide/tall that window actually is.
+  return (
+    <View style={webStyles.backdrop}>
+      <View style={webStyles.notch} />
+      <View style={webStyles.phoneFrame}>
+        <AppContent />
+      </View>
+    </View>
+  );
+}
+
+const webStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0c0c0c"
+  },
+  phoneFrame: {
+    width: 412,
+    maxWidth: "100%",
+    height: "100%",
+    maxHeight: 915,
+    overflow: "hidden",
+    borderRadius: 44,
+    borderWidth: 12,
+    borderColor: "#111",
+    backgroundColor: "#f7f4ee",
+    shadowColor: "#000",
+    shadowOpacity: 0.55,
+    shadowRadius: 40,
+    shadowOffset: { width: 0, height: 20 },
+    elevation: 24
+  },
+  notch: {
+    position: "absolute",
+    top: 22,
+    width: 120,
+    height: 26,
+    borderRadius: 16,
+    backgroundColor: "#111",
+    zIndex: 10
+  }
+});

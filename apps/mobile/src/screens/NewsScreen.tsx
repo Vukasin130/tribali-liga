@@ -1,0 +1,692 @@
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Animated,
+  Image,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  deleteNews,
+  fetchCurrentGoalPoll,
+  fetchNews,
+  fetchSponsor,
+  fetchStories,
+  finishGoalPoll,
+  listLiveMatches,
+  setGoalPollStatus,
+  voteGoalPoll
+} from "../api/endpoints";
+import type { GoalPoll, MatchSummary, NewsFeed, NewsItem, Sponsor, StoryFolder } from "../api/types";
+import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton, SectionTitle } from "../components/ui";
+import { colors } from "../theme/colors";
+import { InlineVideo } from "../components/InlineVideo";
+import { StoryViewerModal } from "./StoryViewerModal";
+import { NewsDetailModal } from "./NewsDetailModal";
+import { NewsComposerModal } from "./NewsComposerModal";
+import { StoryComposerModal } from "./StoryComposerModal";
+import { GoalPollComposerModal } from "./GoalPollComposerModal";
+import { SponsorEditorModal } from "./SponsorEditorModal";
+import { LiveMatchesModal } from "./LiveMatchesModal";
+import { useAuth } from "../state/AuthContext";
+
+export function NewsScreen() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+
+  const [news, setNews] = useState<NewsFeed | null>(null);
+  const [stories, setStories] = useState<StoryFolder[]>([]);
+  const [poll, setPoll] = useState<GoalPoll | null>(null);
+  const [sponsor, setSponsor] = useState<Sponsor | null>(null);
+  const [liveMatches, setLiveMatches] = useState<MatchSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeStoryFolder, setActiveStoryFolder] = useState<number | null>(null);
+  const [activeNewsItem, setActiveNewsItem] = useState<NewsItem | null>(null);
+  const [carouselWidth, setCarouselWidth] = useState(0);
+  const [newsSlide, setNewsSlide] = useState(0);
+  const [showNewsComposer, setShowNewsComposer] = useState(false);
+  const [showStoryComposer, setShowStoryComposer] = useState(false);
+  const [editingNewsItem, setEditingNewsItem] = useState<NewsItem | null>(null);
+  const [showGoalPollComposer, setShowGoalPollComposer] = useState(false);
+  const [showSponsorEditor, setShowSponsorEditor] = useState(false);
+  const [pollActionLoading, setPollActionLoading] = useState(false);
+  const [showLiveMatches, setShowLiveMatches] = useState(false);
+  const newsScrollRef = useRef<ScrollView>(null);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (liveMatches.length === 0) {
+      pulseAnim.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.25, duration: 650, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 650, useNativeDriver: true })
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [liveMatches.length, pulseAnim]);
+
+  const load = useCallback(async () => {
+    setError("");
+    try {
+      const [newsFeed, storyFolders, currentPoll, sponsorData, live] = await Promise.all([
+        fetchNews(),
+        fetchStories().catch(() => []),
+        fetchCurrentGoalPoll().catch(() => null),
+        fetchSponsor().catch(() => null),
+        listLiveMatches().catch(() => [])
+      ]);
+      setNews(newsFeed);
+      setStories(storyFolders);
+      setPoll(currentPoll);
+      setSponsor(sponsorData);
+      setLiveMatches(live);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ne mogu da ucitam vesti.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const featuredCount = news?.featured.length ?? 0;
+
+  useEffect(() => {
+    if (featuredCount <= 1 || !carouselWidth) return;
+    const timer = setInterval(() => {
+      setNewsSlide((prev) => {
+        const next = (prev + 1) % featuredCount;
+        newsScrollRef.current?.scrollTo({ x: next * carouselWidth, animated: true });
+        return next;
+      });
+    }, 5500);
+    return () => clearInterval(timer);
+  }, [featuredCount, carouselWidth]);
+
+  function goToNewsSlide(index: number) {
+    if (!featuredCount || !carouselWidth) return;
+    const clamped = (index + featuredCount) % featuredCount;
+    setNewsSlide(clamped);
+    newsScrollRef.current?.scrollTo({ x: clamped * carouselWidth, animated: true });
+  }
+
+  function handleNewsScrollEnd(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    if (!carouselWidth) return;
+    setNewsSlide(Math.round(event.nativeEvent.contentOffset.x / carouselWidth));
+  }
+
+  async function handleVote(optionId: string) {
+    if (!poll) return;
+    try {
+      const updated = await voteGoalPoll(poll.id, optionId);
+      setPoll(updated);
+    } catch {
+      // silently ignore - poll UI will just not update
+    }
+  }
+
+  async function handleDeleteNews(id: string) {
+    try {
+      await deleteNews(id);
+      load();
+    } catch {
+      // ignore - user can retry from the list
+    }
+  }
+
+  async function handleClosePoll() {
+    if (!poll) return;
+    setPollActionLoading(true);
+    try {
+      const updated = await setGoalPollStatus(poll.id, "closed");
+      setPoll(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Anketa nije zatvorena.");
+    } finally {
+      setPollActionLoading(false);
+    }
+  }
+
+  async function handleReopenPoll() {
+    if (!poll) return;
+    setPollActionLoading(true);
+    try {
+      const updated = await setGoalPollStatus(poll.id, "open");
+      setPoll(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Anketa nije ponovo otvorena.");
+    } finally {
+      setPollActionLoading(false);
+    }
+  }
+
+  async function handleFinishPoll(winnerOptionId?: string) {
+    if (!poll) return;
+    setPollActionLoading(true);
+    try {
+      const updated = await finishGoalPoll(poll.id, winnerOptionId);
+      setPoll(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Anketa nije zavrsena.");
+    } finally {
+      setPollActionLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.screen}>
+        <LoadingState label="Ucitavanje vesti..." />
+      </View>
+    );
+  }
+
+  return (
+    <>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.purple} />}
+    >
+      <View style={styles.brandRow}>
+        <View style={styles.brandLeft}>
+          <Image source={require("../../assets/icon.png")} style={styles.brandMark} resizeMode="cover" />
+          <View>
+            <Text style={styles.brandName}>Tribali</Text>
+            <Text style={styles.brandName}>Liga</Text>
+          </View>
+        </View>
+        <TouchableOpacity style={styles.liveChip} onPress={() => setShowLiveMatches(true)}>
+          {liveMatches.length > 0 ? <Animated.View style={[styles.liveDot, { opacity: pulseAnim }]} /> : null}
+          <Ionicons name="notifications-outline" size={14} color={colors.ink} />
+          <Text style={styles.liveChipText}>Live</Text>
+        </TouchableOpacity>
+      </View>
+
+      {error ? <ErrorState message={error} onRetry={load} /> : null}
+
+      {stories.length > 0 || isAdmin ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesRow}>
+          {isAdmin ? (
+            <TouchableOpacity style={styles.storyBubble} onPress={() => setShowStoryComposer(true)}>
+              <View style={styles.storyRingAdd}>
+                <View style={styles.storyRingInner}>
+                  <Ionicons name="add" size={22} color={colors.purple} />
+                </View>
+              </View>
+              <Text style={styles.storyLabel} numberOfLines={1}>Dodaj</Text>
+            </TouchableOpacity>
+          ) : null}
+          {stories.map((folder, index) => (
+            <TouchableOpacity key={folder.id} style={styles.storyBubble} onPress={() => setActiveStoryFolder(index)}>
+              <LinearGradient colors={["#D9B24C", "#C9A227", "#8A6D1F"]} style={styles.storyRing}>
+                <View style={styles.storyRingInner}>
+                  {folder.logoUrl ? (
+                    <Image source={{ uri: folder.logoUrl }} style={styles.storyImage} />
+                  ) : (
+                    <View style={styles.storyPlaceholder}>
+                      <Text style={styles.storyPlaceholderText}>{folder.title.slice(0, 2).toUpperCase()}</Text>
+                    </View>
+                  )}
+                </View>
+              </LinearGradient>
+              <Text style={styles.storyLabel} numberOfLines={1}>{folder.title}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      ) : null}
+
+      {isAdmin ? (
+        <TouchableOpacity style={styles.adminAddNewsButton} onPress={() => setShowNewsComposer(true)}>
+          <Ionicons name="add-circle" size={18} color="#fff" />
+          <Text style={styles.adminAddNewsButtonText}>Nova vest</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {news && news.featured.length > 0 ? (
+        <View
+          style={styles.carouselWrap}
+          onLayout={(event) => setCarouselWidth(event.nativeEvent.layout.width)}
+        >
+          {carouselWidth > 0 ? (
+            <ScrollView
+              ref={newsScrollRef}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={handleNewsScrollEnd}
+            >
+              {news.featured.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={{ width: carouselWidth }}
+                  activeOpacity={0.92}
+                  onPress={() => setActiveNewsItem(item)}
+                >
+                  <View style={styles.heroCard}>
+                    {item.mediaUrl ? (
+                      <Image source={{ uri: item.mediaUrl }} style={styles.heroImage} />
+                    ) : (
+                      <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.heroImage} />
+                    )}
+                    <View style={styles.heroTextBlock}>
+                      <Text style={styles.heroDate}>{formatDate(item.publishedAt)}</Text>
+                      <Text style={styles.heroTitle} numberOfLines={2}>{item.title}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : null}
+
+          {featuredCount > 1 ? (
+            <>
+              <TouchableOpacity
+                style={[styles.carouselArrow, styles.carouselArrowLeft]}
+                onPress={() => goToNewsSlide(newsSlide - 1)}
+              >
+                <Ionicons name="chevron-back" size={20} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.carouselArrow, styles.carouselArrowRight]}
+                onPress={() => goToNewsSlide(newsSlide + 1)}
+              >
+                <Ionicons name="chevron-forward" size={20} color="#fff" />
+              </TouchableOpacity>
+              <View style={styles.carouselDots} pointerEvents="none">
+                {news.featured.map((_, index) => (
+                  <View key={index} style={[styles.dot, index === newsSlide ? styles.dotActive : null]} />
+                ))}
+              </View>
+            </>
+          ) : null}
+        </View>
+      ) : null}
+
+      {news && news.all.length === 0 ? <EmptyState message="Jos nema objavljenih vesti." /> : null}
+
+      {news && news.latest.length > 0 ? (
+        <View style={styles.section}>
+          <SectionTitle title="Ostale vesti" />
+          {news.latest.map((item) => (
+            <TouchableOpacity key={item.id} onPress={() => setActiveNewsItem(item)}>
+              <View style={styles.newsRow}>
+                <View style={styles.newsRowText}>
+                  <Text style={styles.newsTitleCompact} numberOfLines={2}>{item.title}</Text>
+                  <Text style={styles.newsMeta}>{formatDate(item.publishedAt)}</Text>
+                </View>
+                {item.mediaUrl ? <Image source={{ uri: item.mediaUrl }} style={styles.newsRowThumb} /> : <View style={[styles.newsRowThumb, styles.newsRowThumbPlaceholder]} />}
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
+
+      {sponsor || isAdmin ? (
+        <Card style={styles.sponsorCard}>
+          <Text style={styles.sponsorEyebrow}>Sponzor najlepseg gola nedelje</Text>
+          {sponsor ? (
+            <View style={styles.sponsorRow}>
+              {sponsor.logoUrl ? <Image source={{ uri: sponsor.logoUrl }} style={styles.sponsorLogo} /> : null}
+              <View style={styles.sponsorTextBlock}>
+                <Text style={styles.sponsorTitle}>{sponsor.title}</Text>
+                {sponsor.subtitle ? <Text style={styles.sponsorSubtitle}>{sponsor.subtitle}</Text> : null}
+              </View>
+            </View>
+          ) : (
+            <Text style={styles.pollCopy}>Jos nema podesenog sponzora.</Text>
+          )}
+          {isAdmin ? (
+            <TouchableOpacity style={styles.adminActionButton} onPress={() => setShowSponsorEditor(true)}>
+              <Text style={styles.adminActionButtonText}>{sponsor ? "Izmeni sponzora" : "Dodaj sponzora"}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {poll ? (
+        <Card style={styles.pollCard}>
+          {poll.status === "closed" ? (
+            <GoalPollResult poll={poll} />
+          ) : (
+            <SectionTitle
+              eyebrow={poll.status === "tiebreak" ? "Nereseno" : "Glasaj"}
+              title={poll.status === "tiebreak" ? "Neresen rezultat" : poll.title}
+            />
+          )}
+          {poll.status === "tiebreak" ? (
+            <Text style={styles.pollCopy}>Izjednaceno je vise kandidata. Admin bira konacnog pobednika.</Text>
+          ) : poll.status === "open" && poll.copy ? (
+            <Text style={styles.pollCopy}>{poll.copy}</Text>
+          ) : null}
+          {(poll.status === "open" ? poll.options : poll.status === "tiebreak" ? topTiedOptions(poll.options) : []).map((option) => (
+            <View key={option.id} style={styles.pollOption}>
+              {option.videoUrl ? <InlineVideo uri={option.videoUrl} style={styles.pollOptionVideo} controls /> : null}
+              <View style={styles.pollOptionHead}>
+                <Text style={styles.pollOptionName}>{option.title}</Text>
+                <Text style={styles.pollOptionPercent}>{option.percent}%</Text>
+              </View>
+              <View style={styles.pollBarTrack}>
+                <View style={[styles.pollBarFill, { width: `${Math.max(4, option.percent)}%` }]} />
+              </View>
+              {poll.status === "open" ? (
+                <PrimaryButton
+                  label={poll.userVote === option.id ? "Glasano - ukloni glas" : "Glasaj"}
+                  variant={poll.userVote === option.id ? "danger" : "ghost"}
+                  onPress={() => handleVote(option.id)}
+                />
+              ) : null}
+              {poll.status === "tiebreak" && isAdmin ? (
+                <TouchableOpacity
+                  style={styles.adminActionButtonPrimary}
+                  onPress={() => handleFinishPoll(option.id)}
+                  disabled={pollActionLoading}
+                >
+                  <Text style={styles.adminActionButtonPrimaryText}>
+                    {pollActionLoading ? "Sacekaj..." : `Proglasi "${option.title}" pobednikom`}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ))}
+          <Text style={styles.pollTotal}>{poll.totalVotes} glasova ukupno</Text>
+
+          {isAdmin ? (
+            <View style={styles.adminPollActions}>
+              {poll.status === "open" ? (
+                <TouchableOpacity style={styles.adminActionButton} onPress={handleClosePoll} disabled={pollActionLoading}>
+                  <Text style={styles.adminActionButtonText}>{pollActionLoading ? "Sacekaj..." : "Zatvori glasanje"}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {poll.status !== "open" && poll.status !== "closed" ? (
+                <TouchableOpacity style={styles.adminActionButton} onPress={handleReopenPoll} disabled={pollActionLoading}>
+                  <Text style={styles.adminActionButtonText}>{pollActionLoading ? "Sacekaj..." : "Ponovo otvori"}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {poll.status === "open" ? (
+                <TouchableOpacity style={styles.adminActionButtonPrimary} onPress={() => handleFinishPoll()} disabled={pollActionLoading}>
+                  <Text style={styles.adminActionButtonPrimaryText}>{pollActionLoading ? "Sacekaj..." : "Zavrsi i proglasi pobednika"}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity style={styles.adminActionButton} onPress={() => setShowGoalPollComposer(true)}>
+                <Text style={styles.adminActionButtonText}>Nova anketa</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </Card>
+      ) : isAdmin ? (
+        <Card style={styles.pollCard}>
+          <SectionTitle eyebrow="Gol nedelje" title="Trenutno nema aktivne ankete" />
+          <TouchableOpacity style={styles.adminActionButtonPrimary} onPress={() => setShowGoalPollComposer(true)}>
+            <Text style={styles.adminActionButtonPrimaryText}>Pokreni novu anketu</Text>
+          </TouchableOpacity>
+        </Card>
+      ) : null}
+    </ScrollView>
+
+    {activeStoryFolder !== null ? (
+      <StoryViewerModal
+        folders={stories}
+        startFolderIndex={activeStoryFolder}
+        onClose={() => setActiveStoryFolder(null)}
+        isAdmin={isAdmin}
+        onDeleted={() => { setActiveStoryFolder(null); load(); }}
+      />
+    ) : null}
+
+    {showLiveMatches ? <LiveMatchesModal onClose={() => setShowLiveMatches(false)} /> : null}
+
+    {activeNewsItem ? (
+      <NewsDetailModal
+        item={activeNewsItem}
+        onClose={() => setActiveNewsItem(null)}
+        onEdit={isAdmin ? () => { setEditingNewsItem(activeNewsItem); setActiveNewsItem(null); } : undefined}
+        onDelete={isAdmin ? () => handleDeleteNews(activeNewsItem.id) : undefined}
+      />
+    ) : null}
+
+    {showNewsComposer ? (
+      <NewsComposerModal
+        onClose={() => setShowNewsComposer(false)}
+        onSaved={() => { setShowNewsComposer(false); load(); }}
+      />
+    ) : null}
+
+    {editingNewsItem ? (
+      <NewsComposerModal
+        existingItem={editingNewsItem}
+        onClose={() => setEditingNewsItem(null)}
+        onSaved={() => { setEditingNewsItem(null); load(); }}
+      />
+    ) : null}
+
+    {showStoryComposer ? (
+      <StoryComposerModal
+        onClose={() => setShowStoryComposer(false)}
+        onSaved={() => { setShowStoryComposer(false); load(); }}
+      />
+    ) : null}
+
+    {showGoalPollComposer ? (
+      <GoalPollComposerModal
+        onClose={() => setShowGoalPollComposer(false)}
+        onSaved={() => { setShowGoalPollComposer(false); load(); }}
+      />
+    ) : null}
+
+    {showSponsorEditor ? (
+      <SponsorEditorModal
+        sponsor={sponsor}
+        onClose={() => setShowSponsorEditor(false)}
+        onSaved={() => { setShowSponsorEditor(false); load(); }}
+      />
+    ) : null}
+    </>
+  );
+}
+
+function formatDate(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("sr-RS", { day: "numeric", month: "short" });
+}
+
+function topTiedOptions(options: GoalPoll["options"]): GoalPoll["options"] {
+  if (!options.length) return [];
+  const topVotes = Math.max(...options.map((option) => option.votes));
+  return options.filter((option) => option.votes === topVotes);
+}
+
+function GoalPollResult({ poll }: { poll: GoalPoll }) {
+  const winner = poll.options.find((option) => option.isWinner) ?? [...poll.options].sort((a, b) => b.percent - a.percent)[0];
+  if (!winner) {
+    return <SectionTitle eyebrow="Rezultati" title="Anketa je zavrsena" />;
+  }
+  return (
+    <View>
+      {winner.videoUrl ? (
+        <InlineVideo key={winner.id} uri={winner.videoUrl} style={styles.winnerVideo} controls />
+      ) : null}
+      <View style={styles.winnerBanner}>
+        <View style={styles.winnerTrophy}>
+          <Ionicons name="trophy" size={20} color={colors.yellow} />
+        </View>
+        <View style={styles.winnerTextBlock}>
+          <Text style={styles.winnerEyebrow}>Pobednik gola nedelje</Text>
+          <Text style={styles.winnerName}>{winner.title}</Text>
+          <Text style={styles.winnerMeta}>{winner.votes}/{poll.totalVotes} glasova ({winner.percent}%)</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.background },
+  content: { padding: 18, paddingTop: 58, gap: 16, paddingBottom: 40 },
+  brandRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  adminAddNewsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: colors.purple,
+    borderRadius: 14,
+    paddingVertical: 12
+  },
+  adminAddNewsButtonText: { color: "#fff", fontWeight: "700" },
+  brandLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
+  brandMark: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#141414" },
+  brandName: { color: colors.ink, fontWeight: "700", fontSize: 14, lineHeight: 16 },
+  liveChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 12
+  },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.live },
+  liveChipText: { color: colors.ink, fontWeight: "600", fontSize: 12 },
+  storiesRow: { flexDirection: "row", gap: 14, paddingRight: 8 },
+  storyBubble: { alignItems: "center", width: 70 },
+  storyRing: { width: 66, height: 66, borderRadius: 33, alignItems: "center", justifyContent: "center", padding: 3 },
+  storyRingAdd: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 3,
+    borderWidth: 2,
+    borderStyle: "dashed",
+    borderColor: colors.purple
+  },
+  storyRingInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  storyImage: { width: 54, height: 54, borderRadius: 27 },
+  storyPlaceholder: { width: 54, height: 54, borderRadius: 27, backgroundColor: colors.purple, alignItems: "center", justifyContent: "center" },
+  storyPlaceholderText: { color: "#fff", fontWeight: "700" },
+  storyLabel: { color: colors.textMuted, fontSize: 11, marginTop: 4, fontWeight: "600" },
+  section: { gap: 10 },
+  pollCard: { gap: 10 },
+  pollCopy: { color: colors.textMuted },
+  pollOption: { gap: 6 },
+  pollOptionVideo: { width: "100%", height: 180, borderRadius: 14, backgroundColor: "#000", marginBottom: 2 },
+  pollOptionHead: { flexDirection: "row", justifyContent: "space-between" },
+  pollOptionName: { color: colors.textPrimary, fontWeight: "700" },
+  pollOptionPercent: { color: colors.pink, fontWeight: "700" },
+  pollBarTrack: { height: 8, borderRadius: 999, backgroundColor: colors.surfaceMuted, overflow: "hidden" },
+  pollBarFill: { height: 8, borderRadius: 999, backgroundColor: colors.purple },
+  pollTotal: { color: colors.textMuted, fontWeight: "600", textAlign: "center" },
+  adminPollActions: { gap: 8, marginTop: 4, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.cardBorder },
+  adminActionButton: {
+    alignItems: "center",
+    paddingVertical: 11,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceMuted
+  },
+  adminActionButtonText: { color: colors.purple, fontWeight: "700", fontSize: 13 },
+  adminActionButtonPrimary: { alignItems: "center", paddingVertical: 12, borderRadius: 14, backgroundColor: colors.purple },
+  adminActionButtonPrimaryText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  sponsorCard: { gap: 10 },
+  sponsorEyebrow: { color: colors.textMuted, fontWeight: "700", fontSize: 11, textTransform: "uppercase" },
+  sponsorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  sponsorLogo: { width: 48, height: 48, borderRadius: 12 },
+  sponsorTextBlock: { flex: 1, gap: 2 },
+  sponsorTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
+  sponsorSubtitle: { color: colors.textMuted, fontSize: 12 },
+  carouselWrap: {
+    borderRadius: 26,
+    overflow: "hidden",
+    backgroundColor: "#141414",
+    shadowColor: "#141414",
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6
+  },
+  carouselArrow: {
+    position: "absolute",
+    top: "38%",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  carouselArrowLeft: { left: 10 },
+  carouselArrowRight: { right: 10 },
+  carouselDots: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 14,
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 6
+  },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.42)" },
+  dotActive: { width: 20, backgroundColor: "#fff" },
+  heroCard: { backgroundColor: "#141414" },
+  heroImage: { width: "100%", height: 190 },
+  heroTextBlock: { padding: 16, gap: 6 },
+  heroDate: { color: colors.aqua, fontWeight: "700", fontSize: 12 },
+  heroTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
+  winnerVideo: { width: "100%", height: 200, borderRadius: 16, marginBottom: 10, backgroundColor: "#000" },
+  winnerBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(227,178,60,0.14)",
+    borderRadius: 16,
+    padding: 12
+  },
+  winnerTrophy: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(227,178,60,0.24)",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  winnerTextBlock: { flex: 1 },
+  winnerEyebrow: { color: colors.purple, fontWeight: "700", fontSize: 11, textTransform: "uppercase" },
+  winnerName: { color: colors.ink, fontWeight: "700", fontSize: 16, marginTop: 2 },
+  winnerMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  newsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    padding: 14
+  },
+  newsRowText: { flex: 1, gap: 4 },
+  newsTitleCompact: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
+  newsMeta: { color: colors.textMuted, fontSize: 12 },
+  newsRowThumb: { width: 64, height: 64, borderRadius: 12 },
+  newsRowThumbPlaceholder: { backgroundColor: colors.surfaceMuted }
+});

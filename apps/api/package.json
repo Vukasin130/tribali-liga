@@ -1,0 +1,14 @@
+{
+  "name": "@tribali-liga/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/server.mjs",
+    "start": "node src/server.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.7",
+    "pg": "^8.22.0"
+  }
+}
