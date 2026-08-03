@@ -1,3 +1,7 @@
+-- Frozen historical snapshot: schema changes going forward are made through Prisma
+-- Migrate (apps/api/prisma/schema.prisma + apps/api/prisma/migrations/), not by
+-- hand-editing this file. This file is no longer applied for new changes.
+
 create extension if not exists pgcrypto;
 
 do $$
@@ -165,6 +169,24 @@ create table if not exists public.competition_schedule_slots (
   is_reserved boolean not null default false
 );
 
+-- A club is the persistent identity behind a team (name, logo, home city) that
+-- carries across every competition/season it ever plays in. `teams` rows stay
+-- scoped to one competition each (matches/standings/lineups/fantasy all key off
+-- teams.id unchanged) but now point back to the club they belong to, so a new
+-- team for an already-known club can inherit its roster instead of starting empty.
+create table if not exists public.clubs (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  name text not null,
+  short_name text,
+  logo_url text,
+  city_id uuid references public.cities(id) on delete set null,
+  is_active boolean not null default true
+);
+
+create unique index if not exists clubs_name_unique on public.clubs (lower(trim(name)));
+
 create table if not exists public.teams (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
@@ -183,6 +205,7 @@ create table if not exists public.teams (
 alter table public.teams add column if not exists legacy_source text;
 alter table public.teams add column if not exists legacy_id text;
 alter table public.teams add column if not exists source_team_id uuid references public.teams(id) on delete set null;
+alter table public.teams add column if not exists club_id uuid references public.clubs(id) on delete set null;
 
 create table if not exists public.players (
   id uuid primary key default gen_random_uuid(),
@@ -200,6 +223,13 @@ create table if not exists public.players (
 
 alter table public.players add column if not exists legacy_source text;
 alter table public.players add column if not exists legacy_id text;
+alter table public.players add column if not exists club_id uuid references public.clubs(id) on delete set null;
+-- Mirrors teams.source_team_id: when a club's roster is cloned into another
+-- competition (cloneCompetitionTeams/addClubToCompetition), this points back at
+-- the original player row, so a verified-player badge (profiles.verified_player_id)
+-- can eventually be resolved across clones instead of only matching the exact
+-- competition the player was first verified in.
+alter table public.players add column if not exists source_player_id uuid references public.players(id) on delete set null;
 
 do $$
 begin
@@ -208,6 +238,27 @@ begin
     foreign key (verified_player_id) references public.players(id) on delete set null;
 exception when duplicate_object then null;
 end $$;
+
+-- Expo push token for this device - overwritten on each successful registration, so a
+-- user re-installing or switching devices simply replaces the old token.
+alter table public.profiles add column if not exists push_token text;
+
+-- Many-to-many player<->team membership. Replaces reliance on players.team_id
+-- (which forced a real person to be duplicated into a brand-new players row
+-- every time their club entered another competition). A player now has exactly
+-- one players row for life; team_rosters records which team(s)/competition(s)
+-- they're currently rostered on. players.team_id is left in place (unused by
+-- new code) rather than dropped, to avoid touching existing data unnecessarily.
+create table if not exists public.team_rosters (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  player_id uuid not null references public.players(id) on delete cascade,
+  team_id uuid not null references public.teams(id) on delete cascade,
+  is_active boolean not null default true,
+  unique (player_id, team_id)
+);
+create index if not exists team_rosters_player_idx on public.team_rosters(player_id);
+create index if not exists team_rosters_team_idx on public.team_rosters(team_id);
 
 create table if not exists public.matches (
   id uuid primary key default gen_random_uuid(),
@@ -235,6 +286,13 @@ create table if not exists public.matches (
 alter table public.matches add column if not exists legacy_source text;
 alter table public.matches add column if not exists legacy_id text;
 alter table public.matches add column if not exists phase_id uuid references public.competition_phases(id) on delete set null;
+-- Live clock: period is the current half/pause, period_started_at anchors the
+-- client-computed elapsed minute (now - period_started_at), half_length_minutes
+-- lets a match customize its half length. No "current minute" is stored - every
+-- viewer derives it locally from these three fields, so admin and fans always agree.
+alter table public.matches add column if not exists period text not null default 'not_started';
+alter table public.matches add column if not exists period_started_at timestamptz;
+alter table public.matches add column if not exists half_length_minutes integer not null default 20;
 
 create table if not exists public.gameweeks (
   id uuid primary key default gen_random_uuid(),
@@ -270,6 +328,26 @@ create table if not exists public.match_lineups (
 
 alter table public.match_lineups add column if not exists legacy_source text;
 alter table public.match_lineups add column if not exists legacy_id text;
+
+-- A verified player's self-reported availability for one specific upcoming match -
+-- 'unknown' (orange, not answered yet) until they respond 'playing' (green) or
+-- 'not_playing' (red) to the day-before push reminder, so fantasy managers can see
+-- at a glance whether picking them is safe. Only ever created for players whose
+-- profile is claimed+approved (profiles.verified_player_id) - unclaimed players have
+-- no rows here and always read as 'unknown'.
+create table if not exists public.player_match_availability (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  match_id uuid not null references public.matches(id) on delete cascade,
+  player_id uuid not null references public.players(id) on delete cascade,
+  status text not null default 'unknown' check (status in ('unknown', 'playing', 'not_playing')),
+  notified_at timestamptz,
+  responded_at timestamptz,
+  unique (match_id, player_id)
+);
+create index if not exists player_match_availability_match_idx on public.player_match_availability(match_id);
+create index if not exists player_match_availability_player_idx on public.player_match_availability(player_id);
 
 create table if not exists public.match_events (
   id uuid primary key default gen_random_uuid(),
@@ -451,6 +529,12 @@ create table if not exists public.sponsors (
   is_active boolean not null default true
 );
 
+-- 'weekly' = the single "goal of the week" banner (getActiveSponsorDb/updateSponsorDb,
+-- always exactly one such row); 'match' = the per-match sponsor list a live match can
+-- be assigned one of (listSponsorsDb/createSponsorDb). Without this, both features
+-- shared one undifferentiated table and could overwrite/hijack each other.
+alter table public.sponsors add column if not exists kind text not null default 'weekly';
+
 do $$
 begin
   alter table public.matches
@@ -550,6 +634,10 @@ create table if not exists public.fantasy_player_pool (
   unique(competition_id, player_id)
 );
 
+-- When true, syncFantasySeasonPool must never overwrite base_price/current_price
+-- for this row - it's an admin-set preseason price, not the calculated one.
+alter table public.fantasy_player_pool add column if not exists is_price_locked boolean not null default false;
+
 create table if not exists public.fantasy_team_picks (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
@@ -622,6 +710,18 @@ begin
 exception when undefined_table then null;
 end $$;
 
+-- The original unique(competition_id, player_id) meant two fantasy seasons
+-- sharing the same underlying league would fight over the exact same pool
+-- rows - syncing one season would silently reassign (steal) another season's
+-- players. Split into two properly-scoped partial uniques instead: one row
+-- per (season, player) for season-based pools, one row per (competition,
+-- player) only for the legacy season-less pool (fantasy_season_id null).
+alter table public.fantasy_player_pool drop constraint if exists fantasy_player_pool_competition_id_player_id_key;
+create unique index if not exists fantasy_player_pool_season_player_key
+  on public.fantasy_player_pool(fantasy_season_id, player_id) where fantasy_season_id is not null;
+create unique index if not exists fantasy_player_pool_legacy_competition_player_key
+  on public.fantasy_player_pool(competition_id, player_id) where fantasy_season_id is null;
+
 create unique index if not exists fantasy_teams_user_season_key on public.fantasy_teams(user_id, fantasy_season_id) where fantasy_season_id is not null;
 create unique index if not exists fantasy_team_picks_team_player_fgw_key on public.fantasy_team_picks(fantasy_team_id, player_id, fantasy_gameweek_id) where fantasy_gameweek_id is not null;
 create unique index if not exists fantasy_team_picks_team_slot_fgw_key on public.fantasy_team_picks(fantasy_team_id, slot, fantasy_gameweek_id) where fantasy_gameweek_id is not null;
@@ -657,8 +757,10 @@ create index if not exists competition_phase_rules_phase_idx on public.competiti
 create index if not exists competition_schedule_slots_competition_idx on public.competition_schedule_slots(competition_id, starts_at);
 create index if not exists teams_competition_idx on public.teams(competition_id);
 create unique index if not exists teams_legacy_unique on public.teams(legacy_source, legacy_id) where legacy_source is not null and legacy_id is not null;
+create index if not exists teams_club_idx on public.teams(club_id);
 create index if not exists players_team_idx on public.players(team_id);
 create unique index if not exists players_legacy_unique on public.players(legacy_source, legacy_id) where legacy_source is not null and legacy_id is not null;
+create index if not exists players_club_idx on public.players(club_id);
 create index if not exists matches_competition_idx on public.matches(competition_id);
 create unique index if not exists matches_legacy_unique on public.matches(legacy_source, legacy_id) where legacy_source is not null and legacy_id is not null;
 create index if not exists matches_status_idx on public.matches(status);
@@ -733,9 +835,11 @@ alter table public.competition_phase_rules enable row level security;
 alter table public.competition_schedule_slots enable row level security;
 alter table public.teams enable row level security;
 alter table public.players enable row level security;
+alter table public.team_rosters enable row level security;
 alter table public.matches enable row level security;
 alter table public.gameweeks enable row level security;
 alter table public.match_lineups enable row level security;
+alter table public.player_match_availability enable row level security;
 alter table public.match_events enable row level security;
 alter table public.player_match_stats enable row level security;
 alter table public.team_standings enable row level security;
@@ -765,7 +869,7 @@ declare
   table_name text;
 begin
   foreach table_name in array array[
-    'cities','competitions','teams','players','matches','match_lineups','match_events',
+    'cities','competitions','teams','players','team_rosters','matches','match_lineups','player_match_availability','match_events',
     'player_match_stats','team_standings','player_season_stats','gameweeks','story_folders','stories','sponsors','media_links',
     'goal_polls','goal_poll_options','competition_formats','competition_phases','competition_phase_rules',
     'competition_schedule_slots','fantasy_player_pool','fantasy_seasons','fantasy_season_competitions','fantasy_gameweeks'
@@ -878,6 +982,29 @@ on conflict (id) do update set
   public = excluded.public,
   file_size_limit = excluded.file_size_limit,
   allowed_mime_types = excluded.allowed_mime_types;
+
+-- Backfill: one club per distinct (trimmed, case-insensitive) team name that
+-- doesn't have one yet, then link every matching team/player to it. Idempotent
+-- and additive only (only ever fills club_id where it is still null) - safe to
+-- re-run, never touches existing team/player/match/standings rows.
+insert into public.clubs (name, short_name, logo_url, city_id)
+select distinct on (lower(trim(t.name)))
+  t.name, t.short_name, t.logo_url, c.city_id
+from public.teams t
+left join public.competitions c on c.id = t.competition_id
+where t.club_id is null
+order by lower(trim(t.name)), t.created_at asc
+on conflict (lower(trim(name))) do nothing;
+
+update public.teams t
+set club_id = clubs.id
+from public.clubs
+where t.club_id is null and lower(trim(t.name)) = lower(trim(clubs.name));
+
+update public.players p
+set club_id = t.club_id
+from public.teams t
+where p.team_id = t.id and p.club_id is null and t.club_id is not null;
 
 do $$
 declare

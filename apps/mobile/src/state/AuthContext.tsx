@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { getAuthToken, loadStoredToken, setAuthToken } from "../api/client";
-import { fetchSession, login as loginRequest, register as registerRequest } from "../api/endpoints";
+import { fetchSession, login as loginRequest, register as registerRequest, registerPushToken } from "../api/endpoints";
+import { registerForPushNotificationsAsync } from "../notifications";
 import type { AuthUser } from "../api/types";
 
 interface AuthContextValue {
@@ -71,6 +72,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   function refreshUser(nextUser: AuthUser) {
     setUser(nextUser);
   }
+
+  useEffect(() => {
+    if (status !== "signed-in") return;
+    registerForPushNotificationsAsync()
+      .then((token) => (token ? registerPushToken(token) : undefined))
+      .catch(() => undefined);
+  }, [status]);
 
   return (
     <AuthContext.Provider value={{ user, status, error, login, register, logout, refreshUser }}>

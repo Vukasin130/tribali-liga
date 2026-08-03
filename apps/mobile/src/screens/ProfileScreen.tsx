@@ -2,14 +2,25 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { fetchCompetitionTeams, fetchMyVerificationRequests, fetchProfile, fetchTeamPlayers, requestVerification, updateProfile } from "../api/endpoints";
+import {
+  deleteAccount,
+  fetchCompetitionTeams,
+  fetchMyAvailabilityRequests,
+  fetchMyVerificationRequests,
+  fetchProfile,
+  fetchTeamPlayers,
+  requestVerification,
+  setMatchAvailability,
+  updateProfile
+} from "../api/endpoints";
 import { ApiError } from "../api/client";
-import type { Player, Profile, Team, VerificationRequest } from "../api/types";
+import type { MatchAvailabilityRequest, Player, Profile, Team, VerificationRequest } from "../api/types";
 import { Card, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
 import { colors } from "../theme/colors";
 import { useAuth } from "../state/AuthContext";
 import { useCompetition } from "../state/CompetitionContext";
 import { LegalScreen } from "./LegalScreen";
+import { NotificationComposerModal } from "./NotificationComposerModal";
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -21,6 +32,7 @@ export function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [legalScreen, setLegalScreen] = useState<"privacy" | "terms" | null>(null);
+  const [showNotificationComposer, setShowNotificationComposer] = useState(false);
 
   const [requests, setRequests] = useState<VerificationRequest[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -31,6 +43,12 @@ export function ProfileScreen() {
   const [showVerifyForm, setShowVerifyForm] = useState(false);
   const [verifySubmitting, setVerifySubmitting] = useState(false);
   const [verifyError, setVerifyError] = useState("");
+  const [availabilityRequests, setAvailabilityRequests] = useState<MatchAvailabilityRequest[]>([]);
+  const [respondingMatchId, setRespondingMatchId] = useState("");
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     fetchProfile()
@@ -44,7 +62,23 @@ export function ProfileScreen() {
     fetchMyVerificationRequests()
       .then(setRequests)
       .catch(() => undefined);
+
+    fetchMyAvailabilityRequests()
+      .then(setAvailabilityRequests)
+      .catch(() => undefined);
   }, []);
+
+  async function handleRespondAvailability(matchId: string, status: "playing" | "not_playing") {
+    setRespondingMatchId(matchId);
+    try {
+      const updated = await setMatchAvailability(matchId, status);
+      setAvailabilityRequests((previous) => previous.map((item) => (item.matchId === matchId ? { ...item, status: updated.status, respondedAt: updated.respondedAt } : item)));
+    } catch {
+      // Silent - the request stays in the list so the player can just try again.
+    } finally {
+      setRespondingMatchId("");
+    }
+  }
 
   useEffect(() => {
     if (!competitionId) return;
@@ -78,6 +112,23 @@ export function ProfileScreen() {
       setError(err instanceof Error ? err.message : "Cuvanje nije uspelo.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (!deletePassword) {
+      setDeleteError("Unesi lozinku.");
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteAccount(deletePassword);
+      await logout();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Nalog nije obrisan.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -167,6 +218,16 @@ export function ProfileScreen() {
             Kao administrator, ne igras fantasy i ne treba ti oznaka verifikovanog igraca - ti odobravas ili odbijas tudje zahteve za verifikaciju iz admin panela ("Verifikacija igraca").
           </Text>
         </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Notifikacije</Text>
+          <Text style={styles.helperText}>
+            Posalji push notifikaciju svim korisnicima koji su dozvolili notifikacije (npr. najava novog kola, rezultat, vazna vest).
+          </Text>
+          <PrimaryButton label="Posalji notifikaciju" onPress={() => setShowNotificationComposer(true)} />
+        </Card>
       ) : isApprovedPlayer ? (
         <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.verifiedCard}>
           <Pill label="Verified player" tone="success" />
@@ -253,6 +314,48 @@ export function ProfileScreen() {
         </Card>
       )}
 
+      {isApprovedPlayer && availabilityRequests.length > 0 ? (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Da li igras?</Text>
+          <Text style={styles.helperText}>
+            Javi se pre utakmice da fantazi menadzeri znaju da li da te stavljaju u tim.
+          </Text>
+          {availabilityRequests.map((request) => (
+            <View key={request.id} style={styles.availabilityRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.availabilityMatch}>
+                  {request.homeTeamName} - {request.awayTeamName}
+                </Text>
+                <Text style={styles.helperText}>{formatMatchDate(request.scheduledAt)}</Text>
+              </View>
+              {request.status === "unknown" ? (
+                <View style={styles.availabilityButtons}>
+                  <TouchableOpacity
+                    style={[styles.availabilityButton, styles.availabilityButtonYes]}
+                    disabled={respondingMatchId === request.matchId}
+                    onPress={() => handleRespondAvailability(request.matchId, "playing")}
+                  >
+                    <Text style={styles.availabilityButtonYesText}>Igram</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.availabilityButton, styles.availabilityButtonNo]}
+                    disabled={respondingMatchId === request.matchId}
+                    onPress={() => handleRespondAvailability(request.matchId, "not_playing")}
+                  >
+                    <Text style={styles.availabilityButtonNoText}>Ne igram</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Pill
+                  label={request.status === "playing" ? "Igras" : "Ne igras"}
+                  tone={request.status === "playing" ? "success" : "danger"}
+                />
+              )}
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
       <Card style={styles.card}>
         <View style={styles.sponsorRow}>
           <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
@@ -265,6 +368,37 @@ export function ProfileScreen() {
 
       <PrimaryButton label="Odjava" onPress={logout} variant="danger" />
 
+      {showDeleteAccount ? (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Obrisi nalog</Text>
+          <Text style={styles.helperText}>
+            Ovo trajno brise tvoj nalog i sve podatke vezane za njega. Unesi lozinku da potvrdis.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={deletePassword}
+            onChangeText={setDeletePassword}
+            placeholder="Lozinka"
+            placeholderTextColor={colors.textMuted}
+            secureTextEntry
+          />
+          {deleteError ? <Text style={styles.errorText}>{deleteError}</Text> : null}
+          <PrimaryButton
+            label={deleting ? "Brisanje..." : "Potvrdi brisanje naloga"}
+            onPress={handleDeleteAccount}
+            loading={deleting}
+            variant="danger"
+          />
+          <Text style={styles.legalLink} onPress={() => { setShowDeleteAccount(false); setDeletePassword(""); setDeleteError(""); }}>
+            Otkazi
+          </Text>
+        </Card>
+      ) : (
+        <Text style={styles.deleteAccountLink} onPress={() => setShowDeleteAccount(true)}>
+          Obrisi nalog
+        </Text>
+      )}
+
       <View style={styles.legalRow}>
         <Text style={styles.legalLink} onPress={() => setLegalScreen("terms")}>Uslovi koriscenja</Text>
         <Text style={styles.legalDivider}>•</Text>
@@ -272,8 +406,15 @@ export function ProfileScreen() {
       </View>
 
       {legalScreen ? <LegalScreen kind={legalScreen} onClose={() => setLegalScreen(null)} /> : null}
+      {showNotificationComposer ? <NotificationComposerModal onClose={() => setShowNotificationComposer(false)} /> : null}
     </ScrollView>
   );
+}
+
+function formatMatchDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("sr-RS", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function MetricBox({ label, value }: { label: string; value: string }) {
@@ -327,6 +468,21 @@ const styles = StyleSheet.create({
   label: { color: colors.textMuted, fontWeight: "700", fontSize: 12, marginTop: 8 },
   value: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
   helperText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  availabilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.line
+  },
+  availabilityMatch: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
+  availabilityButtons: { flexDirection: "row", gap: 8 },
+  availabilityButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1 },
+  availabilityButtonYes: { backgroundColor: "rgba(8,122,74,0.1)", borderColor: colors.success },
+  availabilityButtonYesText: { color: colors.success, fontWeight: "700", fontSize: 12 },
+  availabilityButtonNo: { backgroundColor: "rgba(160,24,61,0.1)", borderColor: colors.danger },
+  availabilityButtonNoText: { color: colors.danger, fontWeight: "700", fontSize: 12 },
   input: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: 12,
@@ -371,5 +527,6 @@ const styles = StyleSheet.create({
   sponsorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   legalRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 4 },
   legalLink: { color: colors.textMuted, fontSize: 12, fontWeight: "700", textDecorationLine: "underline" },
-  legalDivider: { color: colors.textMuted, fontSize: 12 }
+  legalDivider: { color: colors.textMuted, fontSize: 12 },
+  deleteAccountLink: { color: colors.danger, fontSize: 12, fontWeight: "700", textAlign: "center", marginTop: 2 }
 });

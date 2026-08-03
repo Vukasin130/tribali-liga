@@ -22,13 +22,17 @@ export function SponsorEditorModal({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   async function handlePickLogo() {
     setError("");
     setUploading(true);
     try {
       const uploaded = await pickAndUploadMedia("logo");
-      if (uploaded) setLogoUrl(uploaded.url);
+      if (uploaded) {
+        setLogoUrl(uploaded.url);
+        setPhotoFailed(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Logo nije otpremljen.");
     } finally {
@@ -63,7 +67,9 @@ export function SponsorEditorModal({
           <TextInput style={styles.input} placeholder="Podnaslov (opciono)" placeholderTextColor="#9c9186" value={subtitle} onChangeText={setSubtitle} />
           <TextInput style={styles.input} placeholder="Link ka sponzoru (opciono)" placeholderTextColor="#9c9186" value={targetUrl} onChangeText={setTargetUrl} autoCapitalize="none" />
 
-          {logoUrl ? <Image source={{ uri: logoUrl }} style={styles.logoPreview} /> : null}
+          {logoUrl && !photoFailed ? (
+            <Image source={{ uri: logoUrl }} style={styles.logoPreview} onError={() => setPhotoFailed(true)} />
+          ) : null}
           <TouchableOpacity style={styles.pickButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.pickButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni logo" : "Dodaj logo"}</Text>
           </TouchableOpacity>

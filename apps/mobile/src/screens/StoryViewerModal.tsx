@@ -69,6 +69,7 @@ export function StoryViewerModal({
   const [stats, setStats] = useState<StoryStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [photoFailed, setPhotoFailed] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const seenRef = useRef<Set<string>>(new Set());
 
@@ -85,6 +86,7 @@ export function StoryViewerModal({
     setProgress(0);
     setShowStats(false);
     setStats(null);
+    setPhotoFailed(false);
     if (!seenRef.current.has(story.id)) {
       seenRef.current.add(story.id);
       markStoryViewed(story.id).catch(() => undefined);
@@ -184,8 +186,17 @@ export function StoryViewerModal({
         <View style={styles.mediaWrap}>
           {story.mediaType === "video" ? (
             <StoryVideo key={story.id} uri={story.mediaUrl} paused={showStats} onProgress={setProgress} onFinish={() => advance(1)} />
+          ) : !photoFailed ? (
+            <Image
+              source={{ uri: story.mediaUrl }}
+              style={styles.media}
+              resizeMode="cover"
+              onError={() => setPhotoFailed(true)}
+            />
           ) : (
-            <Image source={{ uri: story.mediaUrl }} style={styles.media} resizeMode="cover" />
+            <View style={[styles.media, styles.mediaFallback]}>
+              <Ionicons name="image-outline" size={48} color="rgba(255,255,255,0.4)" />
+            </View>
           )}
         </View>
 
@@ -308,6 +319,7 @@ const styles = StyleSheet.create({
   statsListItem: { color: colors.textPrimary, fontWeight: "600", fontSize: 13, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: colors.line },
   mediaWrap: { flex: 1, marginTop: 10 },
   media: { flex: 1, width: "100%" },
+  mediaFallback: { alignItems: "center", justifyContent: "center", backgroundColor: "#141414" },
   captionBox: { position: "absolute", left: 14, right: 14, bottom: 90 },
   caption: { color: "#fff", fontWeight: "700", fontSize: 15, textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 6 },
   tapZones: { position: "absolute", top: 90, bottom: 70, left: 0, right: 0, flexDirection: "row" },

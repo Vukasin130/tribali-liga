@@ -3,18 +3,18 @@ import type {
   AuthSession,
   AuthUser,
   City,
+  Club,
   Competition,
   CompetitionSetup,
   FantasyGameweek,
-  FantasyPoolPlayer,
   FantasySeason,
   FantasySeasonPoolPlayer,
   FantasySeasonTeam,
-  FantasyTeam,
   GeneratedMatch,
   GoalPoll,
   LeaderboardEntry,
   LeadersResponse,
+  MatchAvailabilityRequest,
   MatchDetail,
   MatchSummary,
   NewsFeed,
@@ -24,6 +24,7 @@ import type {
   Profile,
   SeasonHub,
   Sponsor,
+  StandingGroup,
   StoryFolder,
   StoryItem,
   StoryStats,
@@ -36,12 +37,25 @@ export function login(email: string, password: string) {
   return apiPost<AuthSession>("/auth/login", { email, password });
 }
 
+export function requestPasswordReset(email: string) {
+  return apiPost<{ ok: boolean }>("/auth/forgot-password", { email });
+}
+
+export function confirmPasswordReset(email: string, code: string, newPassword: string) {
+  return apiPost<{ ok: boolean }>("/auth/reset-password", { email, code, newPassword });
+}
+
+export function deleteAccount(password: string) {
+  return apiDelete<{ deleted: boolean }>("/profile", { password });
+}
+
 export interface UploadTarget {
-  bucket: string;
-  path: string;
-  signedUrl: string;
-  token: string;
-  publicUrl: string;
+  uploadUrl: string;
+  apiKey: string;
+  timestamp: number;
+  signature: string;
+  publicId: string;
+  resourceType: "image" | "video";
   contentType: string;
   maxSizeBytes: number;
 }
@@ -98,6 +112,22 @@ export function updateProfile(payload: Partial<{ displayName: string; avatarUrl:
   return apiPatch<Profile>("/profile", payload);
 }
 
+export function registerPushToken(token: string) {
+  return apiPost<{ ok: boolean }>("/push-token", { token });
+}
+
+export function sendAdminNotification(title: string, body: string) {
+  return apiPost<{ recipients: number; sent: number }>("/admin/notifications/send", { title, body });
+}
+
+export function fetchMyAvailabilityRequests() {
+  return apiGet<MatchAvailabilityRequest[]>("/profile/availability");
+}
+
+export function setMatchAvailability(matchId: string, status: "playing" | "not_playing") {
+  return apiPost<MatchAvailabilityRequest>(`/matches/${matchId}/availability`, { status });
+}
+
 export function fetchNews() {
   return apiGet<NewsFeed>("/news");
 }
@@ -112,6 +142,10 @@ export function listCompetitions() {
 
 export function listCities() {
   return apiGet<City[]>("/cities");
+}
+
+export function createCity(payload: { name: string }) {
+  return apiPost<City>("/admin/cities", payload);
 }
 
 export function createCompetition(payload: { cityId?: string; name: string; seasonName: string; kind?: string; status?: string }) {
@@ -133,7 +167,19 @@ export function createTeam(payload: { competitionId: string; name: string; short
   return apiPost<Team>("/admin/teams", payload);
 }
 
-export function updateTeam(teamId: string, payload: Partial<{ name: string; shortName: string; groupName: string; isActive: boolean }>) {
+export function fetchClubs(search?: string) {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : "";
+  return apiGet<Club[]>(`/clubs${qs}`);
+}
+
+export function addClubToCompetition(
+  competitionId: string,
+  payload: { clubId: string; groupName?: string; includePlayers?: boolean }
+) {
+  return apiPost<{ team: Team; playersCount: number }>(`/admin/competitions/${competitionId}/teams-from-club`, payload);
+}
+
+export function updateTeam(teamId: string, payload: Partial<{ name: string; shortName: string; logoUrl: string; groupName: string; isActive: boolean }>) {
   return apiPatch<Team>(`/admin/teams/${teamId}`, payload);
 }
 
@@ -152,8 +198,15 @@ export function createMatch(payload: { competitionId: string; homeTeamId: string
   return apiPost<MatchDetail>("/admin/matches", payload);
 }
 
-export function updateMatch(matchId: string, payload: Partial<{ scheduledAt: string; venue: string; round: number; status: string }>) {
+export function updateMatch(
+  matchId: string,
+  payload: Partial<{ scheduledAt: string; venue: string; round: number; status: string; sponsorId: string; halfLengthMinutes: number }>
+) {
   return apiPatch<MatchDetail>(`/admin/matches/${matchId}`, payload);
+}
+
+export function setMatchPeriod(matchId: string, period: "first_half" | "halftime" | "second_half") {
+  return apiPatch<MatchDetail>(`/admin/matches/${matchId}/period`, { period });
 }
 
 export interface CompetitionPhaseInput {
@@ -214,32 +267,40 @@ export function listLiveMatches() {
   return apiGet<MatchSummary[]>("/matches/live");
 }
 
-export function fetchFantasyTeam(competitionId: string, gameweekId?: string) {
-  const params = new URLSearchParams({ competitionId });
-  if (gameweekId) params.set("gameweekId", gameweekId);
-  return apiGet<FantasyTeam>(`/fantasy/team?${params.toString()}`);
+export function setMatchStatus(matchId: string, status: string, scores?: { homeScore?: number; awayScore?: number }) {
+  return apiPatch<MatchDetail>(`/admin/matches/${matchId}/status`, { status, ...scores });
 }
 
-export function fetchFantasyPlayerPool(competitionId: string, search?: string) {
-  const params = new URLSearchParams({ competitionId });
-  if (search) params.set("search", search);
-  return apiGet<FantasyPoolPlayer[]>(`/fantasy/player-pool?${params.toString()}`);
+export interface LineupPlayerInput {
+  playerId: string;
+  teamId: string;
+  isStarter?: boolean;
+  isGoalkeeper?: boolean;
+  shirtNumber?: number;
+}
+
+export function setMatchLineup(matchId: string, players: LineupPlayerInput[]) {
+  return apiPut<{ players: unknown[] }>(`/admin/matches/${matchId}/lineup`, { players });
+}
+
+export interface MatchEventInput {
+  type: string;
+  minute: number;
+  teamId?: string;
+  playerId?: string;
+  relatedPlayerId?: string;
+  text?: string;
+  fantasyPointsDelta?: number;
+}
+
+export function addMatchEvent(matchId: string, event: MatchEventInput) {
+  return apiPost<{ match: MatchDetail; event: unknown }>(`/admin/matches/${matchId}/events`, event);
 }
 
 export interface FantasyPickInput {
   playerId: string;
   slot: string;
   isCaptain?: boolean;
-}
-
-export function saveFantasyPicks(payload: { competitionId: string; gameweekId: string; picks: FantasyPickInput[] }) {
-  return apiPut<FantasyTeam>("/fantasy/picks", payload);
-}
-
-export function fetchFantasyLeaderboard(competitionId: string, gameweekId?: string) {
-  const params = new URLSearchParams({ competitionId });
-  if (gameweekId) params.set("gameweekId", gameweekId);
-  return apiGet<LeaderboardEntry[]>(`/fantasy/leaderboard?${params.toString()}`);
 }
 
 export function listFantasySeasons() {
@@ -250,9 +311,10 @@ export function fetchFantasySeason(seasonId: string) {
   return apiGet<Required<FantasySeason>>(`/fantasy-seasons/${seasonId}`);
 }
 
-export function fetchFantasySeasonPlayerPool(seasonId: string, search?: string) {
+export function fetchFantasySeasonPlayerPool(seasonId: string, search?: string, availableOnly = true) {
   const params = new URLSearchParams({ fantasySeasonId: seasonId });
   if (search) params.set("search", search);
+  if (!availableOnly) params.set("availableOnly", "false");
   return apiGet<FantasySeasonPoolPlayer[]>(`/fantasy-seasons-player-pool?${params.toString()}`);
 }
 
@@ -300,6 +362,14 @@ export function syncFantasySeasonPool(seasonId: string) {
   return apiPost<{ seasonId: string; available: number; unavailable: number }>(`/admin/fantasy-seasons/${seasonId}/sync-pool`);
 }
 
+export function setFantasyPoolPlayerPrice(seasonId: string, playerId: string, price: number, isPriceLocked = true) {
+  return apiPatch<FantasySeasonPoolPlayer>(`/admin/fantasy-seasons/${seasonId}/pool/${playerId}/price`, { price, isPriceLocked });
+}
+
+export function setFantasyPoolPlayerAvailability(seasonId: string, playerId: string, isAvailable: boolean) {
+  return apiPatch<FantasySeasonPoolPlayer>(`/admin/fantasy-seasons/${seasonId}/pool/${playerId}/availability`, { isAvailable });
+}
+
 export function createFantasyGameweek(payload: {
   fantasySeasonId: string;
   name: string;
@@ -317,6 +387,10 @@ export function updateFantasyGameweek(id: string, payload: Partial<{ name: strin
 
 export function scoreFantasySeasonGameweek(id: string) {
   return apiPost<{ gameweekId: string; updatedPicks: number; pricedPlayers: number }>(`/admin/fantasy-gameweeks/${id}/score`);
+}
+
+export function autoGenerateFantasyGameweeks(seasonId: string) {
+  return apiPost<{ created: number; refreshed: number; total: number }>(`/admin/fantasy-seasons/${seasonId}/gameweeks/autogenerate`);
 }
 
 export function fetchCurrentGoalPoll() {
@@ -351,6 +425,33 @@ export function fetchSponsor() {
 
 export function updateSponsor(payload: { id?: string; title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }) {
   return apiPatch<Sponsor>("/admin/sponsor", payload);
+}
+
+export function fetchSponsors() {
+  return apiGet<Sponsor[]>("/sponsors");
+}
+
+export function createSponsor(payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string }) {
+  return apiPost<Sponsor>("/admin/sponsors", payload);
+}
+
+export function fetchGeneralSponsors() {
+  return apiGet<Sponsor[]>("/sponsors/general");
+}
+
+export function fetchAllGeneralSponsors() {
+  return apiGet<Sponsor[]>("/admin/sponsors/general");
+}
+
+export function createGeneralSponsor(payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string }) {
+  return apiPost<Sponsor>("/admin/sponsors/general", payload);
+}
+
+export function updateGeneralSponsor(
+  id: string,
+  payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }
+) {
+  return apiPatch<Sponsor>(`/admin/sponsors/general/${id}`, payload);
 }
 
 export function markStoryViewed(storyId: string) {
@@ -401,6 +502,22 @@ export function fetchPlayers(competitionId?: string) {
   return apiGet<Player[]>(competitionId ? `/players?competitionId=${encodeURIComponent(competitionId)}` : "/players");
 }
 
+export function searchPlayers(searchQuery: string) {
+  return apiGet<Player[]>(`/players/search?q=${encodeURIComponent(searchQuery)}`);
+}
+
+export function addPlayerToTeam(teamId: string, playerId: string) {
+  return apiPost<TeamProfile>(`/admin/teams/${teamId}/roster`, { playerId });
+}
+
+export function removePlayerFromTeam(teamId: string, playerId: string) {
+  return apiDelete<TeamProfile>(`/admin/teams/${teamId}/roster/${playerId}`);
+}
+
 export function fetchLeaders(competitionId: string, category: "goals" | "assists" | "saves" | "mvp" = "goals") {
   return apiGet<LeadersResponse>(`/competitions/${competitionId}/leaders?category=${category}`);
+}
+
+export function fetchCompetitionStandings(competitionId: string) {
+  return apiGet<StandingGroup[]>(`/competitions/${competitionId}/standings`);
 }

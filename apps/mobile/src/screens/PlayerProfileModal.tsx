@@ -9,7 +9,10 @@ import { colors, gradients } from "../theme/colors";
 import { kitGradientForTeam } from "../components/PitchPlayerCard";
 import { useAuth } from "../state/AuthContext";
 import { PlayerEditorModal } from "./PlayerEditorModal";
+import { TeamProfileModal } from "./TeamProfileModal";
 import { positionGroupOf } from "../fantasyConstants";
+import { SponsorStrip } from "../components/SponsorStrip";
+import { TeamCrest } from "../components/TeamCrest";
 
 const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Odbrana", napad: "Napad" };
 
@@ -31,10 +34,13 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showEditor, setShowEditor] = useState(false);
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   function load() {
     setLoading(true);
     setError("");
+    setPhotoFailed(false);
     fetchPlayerProfile(playerId)
       .then(setProfile)
       .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam igraca."))
@@ -43,9 +49,10 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
 
   useEffect(load, [playerId]);
 
+  const primaryTeam = profile?.teams[0] ?? null;
   const positionGroup = positionGroupOf(profile?.position || "");
   const isGoalkeeper = positionGroup === "golman";
-  const gradient = isGoalkeeper ? (["#4a3a14", "#141414"] as const) : kitGradientForTeam(profile?.teamId || "");
+  const gradient = isGoalkeeper ? (["#4a3a14", "#141414"] as const) : kitGradientForTeam(primaryTeam?.teamId || "");
 
   const bestGame = useMemo(() => {
     if (!profile || profile.matchStats.length === 0) return 0;
@@ -57,7 +64,10 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
     return [...profile.matchStats].slice(0, 5).reverse();
   }, [profile]);
 
-  const activeSeasonKey = profile ? `${profile.competition.id}` : "";
+  const activeCompetitionIds = useMemo(
+    () => new Set((profile?.teams ?? []).map((t) => t.competitionId)),
+    [profile]
+  );
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -86,8 +96,13 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                 )}
               </View>
 
-              {profile.avatarUrl ? (
-                <Image source={{ uri: profile.avatarUrl }} style={styles.portraitPhoto} resizeMode="cover" />
+              {profile.avatarUrl && !photoFailed ? (
+                <Image
+                  source={{ uri: profile.avatarUrl }}
+                  style={styles.portraitPhoto}
+                  resizeMode="cover"
+                  onError={() => setPhotoFailed(true)}
+                />
               ) : (
                 <LinearGradient colors={gradient} style={styles.portraitFallback}>
                   <Text style={styles.portraitInitials}>{initialsOf(profile.displayName)}</Text>
@@ -96,7 +111,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
 
               <Text style={styles.name}>{profile.displayName}</Text>
               <Text style={styles.teamLine}>
-                {profile.teamName}
+                {primaryTeam?.teamName || "Bez ekipe"}
                 {profile.position ? ` - ${POSITION_LABELS[positionGroup] || profile.position}` : ""}
                 {profile.shirtNumber ? ` - broj ${profile.shirtNumber}` : ""}
               </Text>
@@ -158,6 +173,28 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                 </View>
               ) : null}
 
+              {profile.teams.length > 1 ? (
+                <View>
+                  <Text style={styles.sectionLabel}>Timovi</Text>
+                  <Card style={styles.teamsCard}>
+                    {profile.teams.map((team, index) => (
+                      <TouchableOpacity
+                        key={team.teamId}
+                        style={[styles.teamRow, index > 0 ? styles.teamRowDivider : null]}
+                        onPress={() => setActiveTeamId(team.teamId)}
+                      >
+                        <TeamCrest teamId={team.teamId} name={team.teamName} size={30} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.teamRowName}>{team.teamName}</Text>
+                          <Text style={styles.teamRowMeta}>{team.competitionName}{team.seasonName ? ` - ${team.seasonName}` : ""}</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    ))}
+                  </Card>
+                </View>
+              ) : null}
+
               <View>
                 <Text style={styles.sectionLabel}>Takmicenja</Text>
                 {profile.seasonStats.length === 0 ? <EmptyState message="Jos nema statistike." /> : null}
@@ -166,7 +203,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                     <View style={{ flex: 1 }}>
                       <View style={styles.seasonRowTitle}>
                         <Text style={styles.seasonRowName}>{stat.competitionName}</Text>
-                        {stat.competitionId === activeSeasonKey ? <Pill label="Aktivna" tone="success" /> : null}
+                        {activeCompetitionIds.has(stat.competitionId) ? <Pill label="Aktivna" tone="success" /> : null}
                       </View>
                       <Text style={styles.seasonRowMeta}>
                         {stat.teamName} - {stat.appearances} mec.  {stat.goals} gol.  {stat.assists} as.
@@ -189,6 +226,8 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                   </View>
                 ))}
               </View>
+
+              <SponsorStrip />
             </View>
           </ScrollView>
         ) : null}
@@ -209,6 +248,8 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
             }}
           />
         ) : null}
+
+        {activeTeamId ? <TeamProfileModal teamId={activeTeamId} onClose={() => setActiveTeamId(null)} /> : null}
       </View>
     </Modal>
   );
@@ -301,6 +342,11 @@ const styles = StyleSheet.create({
   },
   formRoundValue: { color: colors.ink, fontWeight: "900", fontSize: 15 },
   formRoundLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", marginTop: 2 },
+  teamsCard: { gap: 0 },
+  teamRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
+  teamRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  teamRowName: { color: colors.ink, fontWeight: "800", fontSize: 14 },
+  teamRowMeta: { color: colors.textMuted, fontSize: 12, fontWeight: "600", marginTop: 2 },
   seasonRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
   seasonRowTitle: { flexDirection: "row", alignItems: "center", gap: 6 },
   seasonRowName: { color: colors.ink, fontWeight: "800", fontSize: 14 },

@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { createPlayer, updatePlayer } from "../api/endpoints";
+import { addPlayerToTeam, createPlayer, searchPlayers, updatePlayer } from "../api/endpoints";
 import { pickAndUploadMedia } from "../api/upload";
+import type { Player } from "../api/types";
 import { colors } from "../theme/colors";
-import { PrimaryButton } from "../components/ui";
+import { Card, PrimaryButton } from "../components/ui";
 
 const POSITIONS = [
   { value: "golman", label: "Golman" },
@@ -30,13 +31,49 @@ export function PlayerEditorModal({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [searchResults, setSearchResults] = useState<Player[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [photoFailed, setPhotoFailed] = useState(false);
+
+  // Only relevant for "new player on this team" - lets the admin find and reuse
+  // an existing identity (same person already on another team) instead of
+  // accidentally creating a duplicate the way the old flow always did.
+  useEffect(() => {
+    if (isEditing || !teamId || displayName.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      searchPlayers(displayName.trim())
+        .then((results) => setSearchResults(results.filter((p) => !p.teams.some((t) => t.teamId === teamId))))
+        .catch(() => setSearchResults([]));
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [displayName, isEditing, teamId]);
+
+  async function handleAttachExisting(existingPlayerId: string) {
+    if (!teamId) return;
+    setAttaching(true);
+    setError("");
+    try {
+      await addPlayerToTeam(teamId, existingPlayerId);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Igrac nije dodat na ekipu.");
+    } finally {
+      setAttaching(false);
+    }
+  }
 
   async function handlePickPhoto() {
     setError("");
     setUploading(true);
     try {
       const uploaded = await pickAndUploadMedia("avatar");
-      if (uploaded) setAvatarUrl(uploaded.url);
+      if (uploaded) {
+        setAvatarUrl(uploaded.url);
+        setPhotoFailed(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Fotografija nije otpremljena.");
     } finally {
@@ -81,11 +118,16 @@ export function PlayerEditorModal({
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.title}>{isEditing ? "Izmeni igraca" : "Novi igrac"}</Text>
 
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatarPreview} resizeMode="cover" />
+          {avatarUrl && !photoFailed ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={styles.avatarPreview}
+              resizeMode="cover"
+              onError={() => setPhotoFailed(true)}
+            />
           ) : (
             <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarPlaceholderText}>Nema fotografije</Text>
+              <Text style={styles.avatarPlaceholderText}>{avatarUrl ? "Fotografija se ne ucitava" : "Nema fotografije"}</Text>
             </View>
           )}
           <TouchableOpacity style={styles.pickButton} onPress={handlePickPhoto} disabled={uploading}>
@@ -99,6 +141,28 @@ export function PlayerEditorModal({
             value={displayName}
             onChangeText={setDisplayName}
           />
+
+          {searchResults.length > 0 ? (
+            <Card style={styles.searchResultsCard}>
+              <Text style={styles.searchResultsLabel}>Vec postoji u bazi - da li je ovo isti igrac?</Text>
+              {searchResults.map((result, index) => (
+                <TouchableOpacity
+                  key={result.id}
+                  style={[styles.searchResultRow, index === 0 ? styles.searchResultRowFirst : null]}
+                  disabled={attaching}
+                  onPress={() => handleAttachExisting(result.id)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.searchResultName}>{result.displayName}</Text>
+                    <Text style={styles.searchResultMeta}>
+                      {result.teams[0]?.teamName || "bez ekipe"}
+                    </Text>
+                  </View>
+                  <Text style={styles.searchResultAction}>Dodaj</Text>
+                </TouchableOpacity>
+              ))}
+            </Card>
+          ) : null}
 
           <View style={styles.field}>
             <Text style={styles.label}>Pozicija</Text>
@@ -159,6 +223,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line
   },
+  searchResultsCard: { gap: 4 },
+  searchResultsLabel: { color: colors.textMuted, fontWeight: "700", fontSize: 11, textTransform: "uppercase", marginBottom: 4 },
+  searchResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+    borderTopWidth: 1,
+    borderTopColor: colors.line
+  },
+  searchResultRowFirst: { borderTopWidth: 0 },
+  searchResultName: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
+  searchResultMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  searchResultAction: { color: colors.purple, fontWeight: "800", fontSize: 12 },
   avatarPreview: { width: 96, height: 96, borderRadius: 48, alignSelf: "center" },
   avatarPlaceholder: {
     width: 96,

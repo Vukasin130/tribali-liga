@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../state/AuthContext";
 import { LoginScreen } from "../screens/LoginScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
+import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
 import { NewsScreen } from "../screens/NewsScreen";
 import { FantasyScreen } from "../screens/FantasyScreen";
 import { SeasonsScreen } from "../screens/SeasonsScreen";
@@ -81,6 +82,7 @@ function AuthNavigator() {
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Register" component={RegisterScreen} />
+      <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     </AuthStack.Navigator>
   );
 }

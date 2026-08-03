@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Image,
+  Linking,
   NativeScrollEvent,
   NativeSyntheticEvent,
   RefreshControl,
@@ -237,13 +238,7 @@ export function NewsScreen() {
             <TouchableOpacity key={folder.id} style={styles.storyBubble} onPress={() => setActiveStoryFolder(index)}>
               <LinearGradient colors={["#D9B24C", "#C9A227", "#8A6D1F"]} style={styles.storyRing}>
                 <View style={styles.storyRingInner}>
-                  {folder.logoUrl ? (
-                    <Image source={{ uri: folder.logoUrl }} style={styles.storyImage} />
-                  ) : (
-                    <View style={styles.storyPlaceholder}>
-                      <Text style={styles.storyPlaceholderText}>{folder.title.slice(0, 2).toUpperCase()}</Text>
-                    </View>
-                  )}
+                  <StoryLogo logoUrl={folder.logoUrl} title={folder.title} />
                 </View>
               </LinearGradient>
               <Text style={styles.storyLabel} numberOfLines={1}>{folder.title}</Text>
@@ -280,11 +275,7 @@ export function NewsScreen() {
                   onPress={() => setActiveNewsItem(item)}
                 >
                   <View style={styles.heroCard}>
-                    {item.mediaUrl ? (
-                      <Image source={{ uri: item.mediaUrl }} style={styles.heroImage} />
-                    ) : (
-                      <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.heroImage} />
-                    )}
+                    <HeroImage mediaUrl={item.mediaUrl} />
                     <View style={styles.heroTextBlock}>
                       <Text style={styles.heroDate}>{formatDate(item.publishedAt)}</Text>
                       <Text style={styles.heroTitle} numberOfLines={2}>{item.title}</Text>
@@ -331,7 +322,7 @@ export function NewsScreen() {
                   <Text style={styles.newsTitleCompact} numberOfLines={2}>{item.title}</Text>
                   <Text style={styles.newsMeta}>{formatDate(item.publishedAt)}</Text>
                 </View>
-                {item.mediaUrl ? <Image source={{ uri: item.mediaUrl }} style={styles.newsRowThumb} /> : <View style={[styles.newsRowThumb, styles.newsRowThumbPlaceholder]} />}
+                <NewsThumb mediaUrl={item.mediaUrl} />
               </View>
             </TouchableOpacity>
           ))}
@@ -341,14 +332,15 @@ export function NewsScreen() {
       {sponsor || isAdmin ? (
         <Card style={styles.sponsorCard}>
           <Text style={styles.sponsorEyebrow}>Sponzor najlepseg gola nedelje</Text>
-          {sponsor ? (
-            <View style={styles.sponsorRow}>
-              {sponsor.logoUrl ? <Image source={{ uri: sponsor.logoUrl }} style={styles.sponsorLogo} /> : null}
-              <View style={styles.sponsorTextBlock}>
-                <Text style={styles.sponsorTitle}>{sponsor.title}</Text>
-                {sponsor.subtitle ? <Text style={styles.sponsorSubtitle}>{sponsor.subtitle}</Text> : null}
-              </View>
-            </View>
+          {sponsor?.logoUrl ? (
+            <TouchableOpacity
+              activeOpacity={sponsor.targetUrl ? 0.8 : 1}
+              onPress={() => {
+                if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
+              }}
+            >
+              <SponsorLogo logoUrl={sponsor.logoUrl} />
+            </TouchableOpacity>
           ) : (
             <Text style={styles.pollCopy}>Jos nema podesenog sponzora.</Text>
           )}
@@ -501,6 +493,40 @@ export function NewsScreen() {
   );
 }
 
+function StoryLogo({ logoUrl, title }: { logoUrl?: string; title: string }) {
+  const [failed, setFailed] = useState(false);
+  if (logoUrl && !failed) {
+    return <Image source={{ uri: logoUrl }} style={styles.storyImage} onError={() => setFailed(true)} />;
+  }
+  return (
+    <View style={styles.storyPlaceholder}>
+      <Text style={styles.storyPlaceholderText}>{title.slice(0, 2).toUpperCase()}</Text>
+    </View>
+  );
+}
+
+function HeroImage({ mediaUrl }: { mediaUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (mediaUrl && !failed) {
+    return <Image source={{ uri: mediaUrl }} style={styles.heroImage} onError={() => setFailed(true)} />;
+  }
+  return <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.heroImage} />;
+}
+
+function NewsThumb({ mediaUrl }: { mediaUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (mediaUrl && !failed) {
+    return <Image source={{ uri: mediaUrl }} style={styles.newsRowThumb} onError={() => setFailed(true)} />;
+  }
+  return <View style={[styles.newsRowThumb, styles.newsRowThumbPlaceholder]} />;
+}
+
+function SponsorLogo({ logoUrl }: { logoUrl: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return <Image source={{ uri: logoUrl }} style={styles.sponsorLogo} resizeMode="cover" onError={() => setFailed(true)} />;
+}
+
 function formatDate(value: string): string {
   if (!value) return "";
   const date = new Date(value);
@@ -529,7 +555,7 @@ function GoalPollResult({ poll }: { poll: GoalPoll }) {
           <Ionicons name="trophy" size={20} color={colors.yellow} />
         </View>
         <View style={styles.winnerTextBlock}>
-          <Text style={styles.winnerEyebrow}>Pobednik gola nedelje</Text>
+          <Text style={styles.winnerEyebrow}>Pobednik najlepseg gola nedelje</Text>
           <Text style={styles.winnerName}>{winner.title}</Text>
           <Text style={styles.winnerMeta}>{winner.votes}/{poll.totalVotes} glasova ({winner.percent}%)</Text>
         </View>
@@ -610,11 +636,7 @@ const styles = StyleSheet.create({
   adminActionButtonPrimaryText: { color: "#fff", fontWeight: "700", fontSize: 13 },
   sponsorCard: { gap: 10 },
   sponsorEyebrow: { color: colors.textMuted, fontWeight: "700", fontSize: 11, textTransform: "uppercase" },
-  sponsorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  sponsorLogo: { width: 48, height: 48, borderRadius: 12 },
-  sponsorTextBlock: { flex: 1, gap: 2 },
-  sponsorTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
-  sponsorSubtitle: { color: colors.textMuted, fontSize: 12 },
+  sponsorLogo: { width: "100%", height: 90, borderRadius: 14, backgroundColor: colors.surfaceMuted },
   carouselWrap: {
     borderRadius: 26,
     overflow: "hidden",

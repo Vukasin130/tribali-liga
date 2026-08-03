@@ -27,7 +27,14 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#C9A227"
+        }
+      ]
     ]
   }
 }

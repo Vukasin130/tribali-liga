@@ -7,13 +7,18 @@
   ],
   "scripts": {
     "mobile": "npm --workspace apps/mobile run start",
-    "admin": "npm --workspace apps/admin run dev",
+    "desktop": "npm --workspace apps/desktop run web",
     "api": "npm --workspace apps/api run dev",
     "db:schema": "node scripts/apply-supabase-schema.mjs",
     "db:import:wp": "node scripts/import-wordpress-history.mjs",
     "db:import:flm": "node scripts/import-flm-full-history.mjs",
-    "build": "npm --workspace apps/admin run build",
-    "check": "npm --workspace apps/admin exec tsc -- --noEmit && npm --workspace apps/mobile exec tsc -- --noEmit"
+    "db:prisma:pull": "npm --workspace apps/api run db:pull",
+    "db:prisma:generate": "npm --workspace apps/api run db:generate",
+    "db:prisma:migrate:dev": "npm --workspace apps/api run db:migrate:dev",
+    "db:prisma:migrate:deploy": "npm --workspace apps/api run db:migrate:deploy",
+    "db:prisma:migrate:status": "npm --workspace apps/api run db:migrate:status",
+    "db:prisma:studio": "npm --workspace apps/api run db:studio",
+    "check": "npm --workspace apps/mobile exec tsc -- --noEmit && npm --workspace apps/desktop exec tsc -- --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

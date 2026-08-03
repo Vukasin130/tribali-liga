@@ -1,8 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import { createUploadTarget } from "./endpoints";
 
-const SUPABASE_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
-
 export interface UploadedMedia {
   url: string;
   mediaType: "image" | "video";
@@ -25,23 +23,27 @@ export async function pickAndUploadMedia(purpose: "story" | "news" | "goal" | "l
   const mediaType: "image" | "video" = asset.type === "video" ? "video" : "image";
   const contentType = asset.mimeType || (mediaType === "video" ? "video/mp4" : "image/jpeg");
 
-  const fileResponse = await fetch(asset.uri);
-  const blob = await fileResponse.blob();
+  const target = await createUploadTarget({ purpose, contentType, sizeBytes: asset.fileSize || 1 });
 
-  const target = await createUploadTarget({ purpose, contentType, sizeBytes: asset.fileSize || blob.size || 1 });
+  const form = new FormData();
+  // React Native's fetch/FormData accepts this {uri, name, type} shape directly - no
+  // need to fetch()+blob() the local file first like a browser would.
+  form.append("file", {
+    uri: asset.uri,
+    name: `upload.${contentType.split("/")[1] || "jpg"}`,
+    type: contentType
+  } as unknown as Blob);
+  form.append("api_key", target.apiKey);
+  form.append("timestamp", String(target.timestamp));
+  form.append("signature", target.signature);
+  form.append("public_id", target.publicId);
 
-  const uploadResponse = await fetch(target.signedUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": contentType,
-      ...(SUPABASE_PUBLISHABLE_KEY ? { apikey: SUPABASE_PUBLISHABLE_KEY } : {})
-    },
-    body: blob
-  });
+  const uploadResponse = await fetch(target.uploadUrl, { method: "POST", body: form });
+  const data = await uploadResponse.json().catch(() => null);
 
-  if (!uploadResponse.ok) {
-    throw new Error(`Upload nije uspeo (${uploadResponse.status}).`);
+  if (!uploadResponse.ok || !data?.secure_url) {
+    throw new Error(data?.error?.message || `Upload nije uspeo (${uploadResponse.status})`);
   }
 
-  return { url: target.publicUrl, mediaType };
+  return { url: data.secure_url as string, mediaType };
 }

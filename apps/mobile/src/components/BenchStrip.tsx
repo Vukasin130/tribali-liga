@@ -49,7 +49,7 @@ export function BenchStrip({
             isGoalkeeper={isGoalkeeperPosition(item.position)}
             statLabel={item.statLabel}
             emptyLabel="Klupa"
-            weightBadge={`${item.weightPercent}%`}
+            weightBadge={item.name ? `${item.weightPercent}%` : undefined}
             isSwapSource={swapSourceSlot === item.slot}
             compact
             onPress={onSelectSlot ? () => onSelectSlot(item.slot) : undefined}

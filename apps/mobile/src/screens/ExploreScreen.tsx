@@ -2,13 +2,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { fetchAllTeams, fetchLeaders, fetchPlayers } from "../api/endpoints";
-import type { LeaderEntry, Player, Team } from "../api/types";
+import { useQuery } from "@tanstack/react-query";
+import { fetchClubs, fetchLeaders, fetchPlayers } from "../api/endpoints";
+import type { Club, LeaderEntry, Player } from "../api/types";
 import { EmptyState, ErrorState, LoadingState, Pill } from "../components/ui";
 import { colors } from "../theme/colors";
 import { useCompetition } from "../state/CompetitionContext";
 import { TeamProfileModal } from "./TeamProfileModal";
 import { PlayerProfileModal } from "./PlayerProfileModal";
+import { SponsorStrip } from "../components/SponsorStrip";
+import { TeamCrest } from "../components/TeamCrest";
 
 type Section = "home" | "players" | "teams" | "stats";
 type StatCategory = "goals" | "assists" | "saves" | "mvp";
@@ -27,13 +30,8 @@ export function ExploreScreen() {
   const { competitions } = useCompetition();
   const [section, setSection] = useState<Section>("home");
   const [search, setSearch] = useState("");
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
   const [statCategory, setStatCategory] = useState<StatCategory>("goals");
   const [statsCompetitionId, setStatsCompetitionId] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
 
@@ -43,47 +41,57 @@ export function ExploreScreen() {
     setStatsCompetitionId(richest?.id || competitions[0].id);
   }, [competitions, statsCompetitionId]);
 
-  useEffect(() => {
-    // Igraci/Ekipe show the complete historical database - no league/season selection needed.
-    if (section === "players") {
-      setLoading(true);
-      setError("");
-      fetchPlayers()
-        .then(setPlayers)
-        .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam igrace."))
-        .finally(() => setLoading(false));
-    }
-    if (section === "teams") {
-      setLoading(true);
-      setError("");
-      fetchAllTeams()
-        .then(setTeams)
-        .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam ekipe."))
-        .finally(() => setLoading(false));
-    }
-  }, [section]);
+  // Igraci/Ekipe show the complete historical database - no league/season selection needed.
+  const playersQuery = useQuery({
+    queryKey: ["players"],
+    queryFn: () => fetchPlayers(),
+    enabled: section === "players"
+  });
+  const clubsQuery = useQuery({
+    queryKey: ["clubs"],
+    queryFn: () => fetchClubs(),
+    enabled: section === "teams"
+  });
+  const leadersQuery = useQuery({
+    queryKey: ["leaders", statsCompetitionId, statCategory],
+    queryFn: () => fetchLeaders(statsCompetitionId, statCategory),
+    enabled: section === "stats" && Boolean(statsCompetitionId)
+  });
 
-  useEffect(() => {
-    if (section !== "stats" || !statsCompetitionId) return;
-    setLoading(true);
-    setError("");
-    fetchLeaders(statsCompetitionId, statCategory)
-      .then((res) => setLeaders(res.leaders))
-      .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam statistiku."))
-      .finally(() => setLoading(false));
-  }, [section, statsCompetitionId, statCategory]);
+  const players: Player[] = playersQuery.data ?? [];
+  const clubs: Club[] = clubsQuery.data ?? [];
+  const leaders: LeaderEntry[] = leadersQuery.data?.leaders ?? [];
+
+  const loading =
+    (section === "players" && playersQuery.isLoading) ||
+    (section === "teams" && clubsQuery.isLoading) ||
+    (section === "stats" && leadersQuery.isLoading);
+
+  const activeError =
+    section === "players"
+      ? playersQuery.error
+      : section === "teams"
+        ? clubsQuery.error
+        : section === "stats"
+          ? leadersQuery.error
+          : null;
+  const fallbackErrorMessage =
+    section === "players" ? "Ne mogu da ucitam igrace." : section === "teams" ? "Ne mogu da ucitam ekipe." : "Ne mogu da ucitam statistiku.";
+  const error = activeError ? (activeError instanceof Error ? activeError.message : fallbackErrorMessage) : "";
 
   const filteredPlayers = useMemo(() => {
     if (!search.trim()) return players;
     const q = search.trim().toLowerCase();
-    return players.filter((p) => p.displayName.toLowerCase().includes(q) || p.teamName.toLowerCase().includes(q));
+    return players.filter(
+      (p) => p.displayName.toLowerCase().includes(q) || p.teams.some((t) => t.teamName.toLowerCase().includes(q))
+    );
   }, [players, search]);
 
-  const filteredTeams = useMemo(() => {
-    if (!search.trim()) return teams;
+  const filteredClubs = useMemo(() => {
+    if (!search.trim()) return clubs;
     const q = search.trim().toLowerCase();
-    return teams.filter((t) => t.name.toLowerCase().includes(q));
-  }, [teams, search]);
+    return clubs.filter((c) => c.name.toLowerCase().includes(q));
+  }, [clubs, search]);
 
   if (section === "home") {
     return (
@@ -116,6 +124,8 @@ export function ExploreScreen() {
             <Text style={styles.actionCardText}>Najbolji strelci, asistenti, golmani i MVP igraci lige.</Text>
           </LinearGradient>
         </TouchableOpacity>
+
+        <SponsorStrip />
       </ScrollView>
     );
   }
@@ -190,7 +200,9 @@ export function ExploreScreen() {
               </View>
               <View style={styles.searchInfo}>
                 <Text style={styles.searchName}>{player.displayName}</Text>
-                <Text style={styles.searchMeta}>{player.teamName} - {player.position || "igrac"}</Text>
+                <Text style={styles.searchMeta}>
+                  {player.teams[0]?.teamName || "bez ekipe"} - {player.position || "igrac"}
+                </Text>
               </View>
             </TouchableOpacity>
           ))}
@@ -199,15 +211,21 @@ export function ExploreScreen() {
 
       {!loading && section === "teams" ? (
         <ScrollView contentContainerStyle={styles.listContent}>
-          {filteredTeams.length === 0 ? <EmptyState message="Nema rezultata." /> : null}
-          {filteredTeams.map((team) => (
-            <TouchableOpacity key={team.id} style={styles.searchRow} onPress={() => setActiveTeamId(team.id)}>
-              <View style={[styles.searchAvatar, styles.searchAvatarSquare]}>
-                <Text style={styles.searchAvatarText}>{initials(team.name)}</Text>
-              </View>
+          {filteredClubs.length === 0 ? <EmptyState message="Nema rezultata." /> : null}
+          {filteredClubs.map((club) => (
+            <TouchableOpacity
+              key={club.id}
+              style={styles.searchRow}
+              onPress={() => setActiveTeamId(club.teams[0]?.teamId ?? null)}
+              disabled={club.teams.length === 0}
+            >
+              <TeamCrest teamId={club.id} name={club.name} logoUrl={club.logoUrl} size={46} />
               <View style={styles.searchInfo}>
-                <Text style={styles.searchName}>{team.name}</Text>
-                {team.playersCount !== undefined ? <Text style={styles.searchMeta}>{team.playersCount} igraca</Text> : null}
+                <Text style={styles.searchName}>{club.name}</Text>
+                <Text style={styles.searchMeta}>
+                  {club.activePlayersCount} {club.activePlayersCount === 1 ? "igrac" : "igraca"}
+                  {club.competitionsCount > 1 ? ` - ${club.competitionsCount} liga` : ""}
+                </Text>
               </View>
             </TouchableOpacity>
           ))}

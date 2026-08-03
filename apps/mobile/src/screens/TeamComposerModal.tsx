@@ -1,15 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { createTeam, fetchCompetitionTeams } from "../api/endpoints";
-import type { Team } from "../api/types";
+import { addClubToCompetition, createTeam, fetchClubs } from "../api/endpoints";
+import type { Club, Team } from "../api/types";
 import { colors } from "../theme/colors";
 import { PrimaryButton } from "../components/ui";
-import { useCompetition } from "../state/CompetitionContext";
-
-interface KnownTeam {
-  name: string;
-  shortName: string;
-}
 
 export function TeamComposerModal({
   competitionId,
@@ -22,10 +16,9 @@ export function TeamComposerModal({
   onClose: () => void;
   onSaved: (team: Team) => void;
 }) {
-  const { competitions } = useCompetition();
-  const [knownTeams, setKnownTeams] = useState<KnownTeam[]>([]);
-  const [knownLoading, setKnownLoading] = useState(true);
-  const [addingExistingName, setAddingExistingName] = useState("");
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [clubsLoading, setClubsLoading] = useState(true);
+  const [addingClubId, setAddingClubId] = useState("");
   const [showNewForm, setShowNewForm] = useState(false);
   const [name, setName] = useState("");
   const [shortName, setShortName] = useState("");
@@ -35,40 +28,33 @@ export function TeamComposerModal({
 
   useEffect(() => {
     let cancelled = false;
-    setKnownLoading(true);
-    Promise.all(competitions.map((competition) => fetchCompetitionTeams(competition.id).catch(() => [])))
+    setClubsLoading(true);
+    fetchClubs()
       .then((rows) => {
-        if (cancelled) return;
-        const byName = new Map<string, KnownTeam>();
-        rows.flat().forEach((team) => {
-          const key = team.name.trim().toLowerCase();
-          if (!key || byName.has(key)) return;
-          byName.set(key, { name: team.name, shortName: team.shortName || "" });
-        });
-        setKnownTeams(Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name)));
+        if (!cancelled) setClubs(rows);
       })
+      .catch(() => undefined)
       .finally(() => {
-        if (!cancelled) setKnownLoading(false);
+        if (!cancelled) setClubsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [competitions.length]);
+  }, []);
 
   const existingNamesLower = useMemo(() => new Set(existingTeamNames.map((n) => n.trim().toLowerCase())), [existingTeamNames]);
-  const pickableTeams = knownTeams.filter((team) => !existingNamesLower.has(team.name.trim().toLowerCase()));
+  const pickableClubs = clubs.filter((club) => !existingNamesLower.has(club.name.trim().toLowerCase()));
 
-  async function handleAddExisting(team: KnownTeam) {
-    setAddingExistingName(team.name);
+  async function handleAddClub(club: Club) {
+    setAddingClubId(club.id);
     setError("");
     try {
-      const created = await createTeam({ competitionId, name: team.name, shortName: team.shortName || undefined });
-      onSaved(created);
+      const result = await addClubToCompetition(competitionId, { clubId: club.id, includePlayers: true });
+      onSaved(result.team);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ekipa nije dodata.");
     } finally {
-      setAddingExistingName("");
+      setAddingClubId("");
     }
   }
 
@@ -94,32 +80,45 @@ export function TeamComposerModal({
     }
   }
 
+  function clubMeta(club: Club): string {
+    const parts: string[] = [];
+    if (club.competitionsCount > 0) {
+      parts.push(`igrala u ${club.competitionsCount} ${club.competitionsCount === 1 ? "ligi" : "liga"}`);
+    }
+    parts.push(`${club.activePlayersCount} ${club.activePlayersCount === 1 ? "igrac" : "igraca"} u bazi`);
+    return parts.join(" · ");
+  }
+
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.title}>Dodaj ekipu</Text>
 
-          <Text style={styles.label}>Postojece ekipe iz baze</Text>
-          {knownLoading ? (
+          <Text style={styles.label}>Postojeci klubovi iz baze</Text>
+          {clubsLoading ? (
             <ActivityIndicator color={colors.purple} />
-          ) : pickableTeams.length === 0 ? (
+          ) : pickableClubs.length === 0 ? (
             <Text style={styles.hint}>
-              {knownTeams.length === 0 ? "Baza jos nema nijednu ekipu." : "Sve poznate ekipe su vec u ovoj ligi."}
+              {clubs.length === 0 ? "Baza jos nema nijedan klub." : "Svi poznati klubovi su vec u ovoj ligi."}
             </Text>
           ) : (
-            <View style={styles.chipsRow}>
-              {pickableTeams.map((team) => (
+            <View style={styles.clubList}>
+              {pickableClubs.map((club) => (
                 <TouchableOpacity
-                  key={team.name}
-                  style={styles.chip}
-                  onPress={() => handleAddExisting(team)}
-                  disabled={!!addingExistingName}
+                  key={club.id}
+                  style={styles.clubRow}
+                  onPress={() => handleAddClub(club)}
+                  disabled={!!addingClubId}
                 >
-                  {addingExistingName === team.name ? (
+                  <View style={styles.flex1}>
+                    <Text style={styles.clubName}>{club.name}</Text>
+                    <Text style={styles.clubMeta}>{clubMeta(club)}</Text>
+                  </View>
+                  {addingClubId === club.id ? (
                     <ActivityIndicator color={colors.purple} size="small" />
                   ) : (
-                    <Text style={styles.chipText}>{team.name}</Text>
+                    <Text style={styles.clubAddText}>Dodaj sa igracima</Text>
                   )}
                 </TouchableOpacity>
               ))}
@@ -175,18 +174,22 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 22, fontWeight: "700", marginBottom: 4 },
   label: { color: colors.textMuted, fontWeight: "700", fontSize: 12, textTransform: "uppercase" },
   hint: { color: colors.textMuted, fontSize: 13 },
-  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+  flex1: { flex: 1 },
+  clubList: { gap: 8 },
+  clubRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
-    borderColor: colors.line,
-    minWidth: 40,
-    alignItems: "center"
+    borderColor: colors.line
   },
-  chipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
+  clubName: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
+  clubMeta: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
+  clubAddText: { color: colors.purple, fontWeight: "700", fontSize: 12 },
   newTeamToggle: { paddingVertical: 10 },
   newTeamToggleText: { color: colors.purple, fontWeight: "700", textAlign: "center" },
   newForm: { gap: 12, backgroundColor: colors.surfaceMuted, borderRadius: 16, padding: 14 },

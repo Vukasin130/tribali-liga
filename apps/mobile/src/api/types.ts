@@ -162,6 +162,11 @@ export interface MatchSummary {
   awayTeamLogoUrl: string;
   homeScore: number;
   awayScore: number;
+  period: string;
+  periodStartedAt: string;
+  halfLengthMinutes: number;
+  sponsorId?: string;
+  sponsor: Sponsor | null;
 }
 
 export interface MatchLineupEntry {
@@ -190,6 +195,7 @@ export interface MatchEventDetail {
   scoreHome: number;
   scoreAway: number;
   text: string | null;
+  fantasyPointsDelta: number;
 }
 
 export interface MatchPlayerStat {
@@ -346,6 +352,19 @@ export interface FantasySeasonPoolPlayer {
   currentPrice: number;
   isAvailable: boolean;
   availabilityNote: string;
+  isPriceLocked: boolean;
+  matchAvailability: "unknown" | "playing" | "not_playing";
+}
+
+export interface MatchAvailabilityRequest {
+  id: string;
+  matchId: string;
+  playerId: string;
+  status: "unknown" | "playing" | "not_playing";
+  respondedAt: string | null;
+  scheduledAt: string;
+  homeTeamName: string;
+  awayTeamName: string;
 }
 
 export interface FantasySeasonPick {
@@ -453,6 +472,7 @@ export interface GoalPoll {
 export interface Team {
   id: string;
   competitionId: string;
+  clubId?: string;
   name: string;
   shortName: string;
   logoUrl?: string;
@@ -461,17 +481,35 @@ export interface Team {
   playersCount?: number;
 }
 
-export interface Player {
+export interface Club {
   id: string;
+  name: string;
+  shortName: string;
+  logoUrl: string;
+  teamsCount: number;
+  competitionsCount: number;
+  activePlayersCount: number;
+  teams: PlayerTeamRef[];
+}
+
+export interface PlayerTeamRef {
   teamId: string;
   teamName: string;
   teamShortName: string;
   competitionId: string;
+  competitionName: string;
+  seasonName: string;
+}
+
+export interface Player {
+  id: string;
+  clubId: string;
   displayName: string;
   position: string;
   shirtNumber: number | null;
   avatarUrl: string;
   isActive: boolean;
+  teams: PlayerTeamRef[];
 }
 
 export interface LeaderEntry {
@@ -532,6 +570,7 @@ export interface TeamProfile {
   matches: MatchSummary[];
   totals: { goals: number; assists: number; saves: number; fantasy_points: number };
   nextMatch: PlayerNextMatch | null;
+  teams: PlayerTeamRef[];
 }
 
 export interface PlayerSeasonStat {
@@ -573,14 +612,12 @@ export interface PlayerNextMatch {
 
 export interface PlayerProfile {
   id: string;
+  clubId: string;
   displayName: string;
   position: string;
   shirtNumber: number | null;
   avatarUrl: string;
-  teamId: string;
-  teamName: string;
-  teamShortName: string;
-  competition: { id: string; name: string; seasonName: string };
+  teams: PlayerTeamRef[];
   seasonStats: PlayerSeasonStat[];
   matchStats: PlayerMatchStat[];
   nextMatch: PlayerNextMatch | null;
@@ -592,4 +629,5 @@ export interface Sponsor {
   subtitle: string;
   logoUrl: string;
   targetUrl: string;
+  isActive?: boolean;
 }

@@ -16,6 +16,7 @@ export function StoryComposerModal({ onClose, onSaved }: { onClose: () => void; 
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   useEffect(() => {
     fetchStoryFolders()
@@ -46,6 +47,7 @@ export function StoryComposerModal({ onClose, onSaved }: { onClose: () => void; 
       if (uploaded) {
         setMediaUrl(uploaded.url);
         setMediaType(uploaded.mediaType);
+        setPhotoFailed(false);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Otpremanje nije uspelo.");
@@ -119,8 +121,12 @@ export function StoryComposerModal({ onClose, onSaved }: { onClose: () => void; 
               <View style={styles.mediaPreviewPlaceholder}>
                 <Text style={styles.mediaPreviewText}>Video spreman</Text>
               </View>
+            ) : !photoFailed ? (
+              <Image source={{ uri: mediaUrl }} style={styles.mediaPreview} onError={() => setPhotoFailed(true)} />
             ) : (
-              <Image source={{ uri: mediaUrl }} style={styles.mediaPreview} />
+              <View style={styles.mediaPreviewPlaceholder}>
+                <Text style={styles.mediaPreviewText}>Slika se ne ucitava</Text>
+              </View>
             )
           ) : null}
 

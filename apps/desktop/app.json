@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "Tribali Liga Desktop",
+    "slug": "tribali-liga-desktop",
+    "version": "0.1.0",
+    "userInterfaceStyle": "automatic",
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

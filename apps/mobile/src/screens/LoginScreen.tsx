@@ -70,6 +70,10 @@ export function LoginScreen({ navigation }: Props) {
 
           <PrimaryButton label={submitting ? "Prijava..." : "Udji u aplikaciju"} onPress={handleLogin} loading={submitting} />
 
+          <Text style={styles.forgotLink} onPress={() => navigation.navigate("ForgotPassword")}>
+            Zaboravili ste lozinku?
+          </Text>
+
           <View style={styles.footerRow}>
             <Text style={styles.footerText}>Nemas nalog?</Text>
             <Text style={styles.footerLink} onPress={() => navigation.navigate("Register")}>
@@ -104,9 +108,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.pink,
     opacity: 0.14
   },
-  content: { flexGrow: 1, padding: 20, justifyContent: "flex-end" },
-  spacer: { flex: 1, minHeight: 60 },
+  content: { flexGrow: 1, padding: 20, justifyContent: "center" },
+  spacer: { height: 24 },
   card: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
     backgroundColor: "#fff",
     borderRadius: 28,
     padding: 24,
@@ -135,6 +142,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line
   },
   error: { color: colors.danger, fontWeight: "600" },
+  forgotLink: { color: colors.purple, fontWeight: "700", textAlign: "center", fontSize: 13 },
   footerRow: { flexDirection: "row", justifyContent: "center", gap: 6, marginTop: 4 },
   footerText: { color: colors.textMuted },
   footerLink: { color: colors.purple, fontWeight: "700" }
