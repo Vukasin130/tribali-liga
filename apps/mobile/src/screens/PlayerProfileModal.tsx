@@ -14,6 +14,7 @@ import { PlayerEditorModal } from "./PlayerEditorModal";
 import { TeamProfileModal } from "./TeamProfileModal";
 import { positionGroupOf } from "../fantasyConstants";
 import { SponsorStrip } from "../components/SponsorStrip";
+import { SponsorSideRail } from "../components/SponsorSideRail";
 import { TeamCrest } from "../components/TeamCrest";
 
 const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Odbrana", napad: "Napad" };
@@ -74,19 +75,21 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
-      <View style={styles.screen}>
-        {loading ? <LoadingState label="Ucitavanje igraca..." /> : null}
-        {error ? (
-          <View style={styles.errorWrap}>
-            <ErrorState message={error} onRetry={load} />
-          </View>
-        ) : null}
+      <View style={[styles.screen, isWide ? styles.screenWide : null]}>
+        {isWide ? <SponsorSideRail /> : null}
+        <View style={styles.mainColumn}>
+          {loading ? <LoadingState label="Ucitavanje igraca..." /> : null}
+          {error ? (
+            <View style={styles.errorWrap}>
+              <ErrorState message={error} onRetry={load} />
+            </View>
+          ) : null}
 
-        {profile ? (
-          <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]} showsVerticalScrollIndicator={false}>
-            <LinearGradient colors={gradients.hero} style={styles.hero}>
-              <View style={styles.heroTopRow}>
-                <TouchableOpacity style={styles.iconButton} onPress={onClose}>
+          {profile ? (
+            <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]} showsVerticalScrollIndicator={false}>
+              <LinearGradient colors={gradients.hero} style={[styles.hero, isWide ? styles.heroWide : null]}>
+                <View style={styles.heroTopRow}>
+                  <TouchableOpacity style={styles.iconButton} onPress={onClose}>
                   <Ionicons name="chevron-back" size={20} color="#fff" />
                 </TouchableOpacity>
                 <Text style={styles.heroBadgeText}>Profil igraca</Text>
@@ -233,7 +236,9 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
               <SponsorStrip />
             </View>
           </ScrollView>
-        ) : null}
+          ) : null}
+        </View>
+        {isWide ? <SponsorSideRail /> : null}
 
         {showEditor && profile ? (
           <PlayerEditorModal
@@ -269,6 +274,8 @@ function StatTile({ label, value }: { label: string; value: number }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  screenWide: { flexDirection: "row", justifyContent: "center" },
+  mainColumn: { flex: 1 },
   errorWrap: { padding: 20, paddingTop: 60 },
   content: { paddingBottom: 60 },
   hero: {
@@ -279,6 +286,11 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32
   },
+  // Matches SponsorSideRail's own paddingTop (24) so the "Profil igraca" label lines
+  // up horizontally with the "Sponzori" label on the rails beside it, instead of
+  // sitting lower under the phone-sized top padding meant for a status bar clearance
+  // that a desktop browser window doesn't have.
+  heroWide: { paddingTop: 24 },
   heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 14 },
   iconButton: {
     width: 36,
