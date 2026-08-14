@@ -4,6 +4,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { updateTeam } from "../api/endpoints";
 import { pickAndUploadMedia } from "../api/upload";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 import { kitGradientForTeam } from "../components/PitchPlayerCard";
 
@@ -28,6 +30,7 @@ export function TeamEditorModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   const gradient = kitGradientForTeam(team.id);
 
@@ -67,7 +70,7 @@ export function TeamEditorModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Izmeni ekipu</Text>
 
           {logoUrl && !photoFailed ? (

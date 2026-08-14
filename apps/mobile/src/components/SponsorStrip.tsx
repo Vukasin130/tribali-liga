@@ -64,7 +64,7 @@ function SponsorTile({ sponsor }: { sponsor: Sponsor }) {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
+      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="contain" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }

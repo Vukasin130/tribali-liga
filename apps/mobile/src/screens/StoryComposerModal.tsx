@@ -4,9 +4,12 @@ import { createStory, createStoryFolder, fetchStoryFolders } from "../api/endpoi
 import { pickAndUploadMedia } from "../api/upload";
 import type { StoryFolder } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function StoryComposerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const isWide = useIsWideScreen();
   const [folders, setFolders] = useState<StoryFolder[]>([]);
   const [folderId, setFolderId] = useState("");
   const [newFolderTitle, setNewFolderTitle] = useState("");
@@ -80,7 +83,7 @@ export function StoryComposerModal({ onClose, onSaved }: { onClose: () => void; 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Novi story</Text>
 
           <Text style={styles.label}>Rubrika</Text>

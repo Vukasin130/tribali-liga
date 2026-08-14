@@ -3,6 +3,8 @@ import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 import { configureCompetition, createCity, createCompetition, deleteCompetition, listCities, updateCompetition } from "../api/endpoints";
 import type { City, Competition } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 type FormatType = "league" | "tournament";
@@ -32,6 +34,7 @@ export function LeagueComposerModal({
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
 
   useEffect(() => {
     listCities()
@@ -136,7 +139,7 @@ export function LeagueComposerModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>{isEditing ? "Izmeni ligu" : "Nova liga"}</Text>
 
           <View style={styles.field}>

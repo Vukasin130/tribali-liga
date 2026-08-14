@@ -41,6 +41,7 @@ interface AuthPayload {
   playerName?: string;
   city?: string;
   team?: string;
+  teamId?: string;
 }
 
 export async function registerUser(payload: AuthPayload) {
@@ -254,9 +255,13 @@ async function upsertProfile({ id, email, displayName, role, verificationStatus 
 
 async function createVerificationRequest(userId: string, payload: AuthPayload) {
   await query(
-    `insert into public.verification_requests (user_id, player_name, status)
-     values ($1, $2, 'pending')`,
-    [userId, String(payload.playerName || payload.displayName || payload.name || "").trim()]
+    `insert into public.verification_requests (user_id, player_name, team_id, status)
+     values ($1, $2, $3, 'pending')`,
+    [
+      userId,
+      String(payload.playerName || payload.displayName || payload.name || "").trim(),
+      payload.teamId ? payload.teamId.trim() || null : null
+    ]
   );
 }
 

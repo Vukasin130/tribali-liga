@@ -283,21 +283,6 @@ export async function getActiveSponsorDb() {
   return result.rows[0] ? normalizeSponsor(result.rows[0]) : null;
 }
 
-// Distinct from getActiveSponsorDb/updateSponsorDb above, which manage the
-// single "goal of the week" sponsor banner (kind='weekly'). This is a real list
-// a match can pick one sponsor from (kind='match') - always inserts a new row,
-// never upserts one shared id. Both kinds share the sponsors table but are kept
-// apart by `kind` so creating/editing one can never hijack or overwrite the other.
-export async function listSponsorsDb() {
-  const result = await query(
-    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
-     from public.sponsors
-     where is_active = true and kind = 'match'
-     order by title`
-  );
-  return result.rows.map(normalizeSponsor);
-}
-
 interface SponsorPayload {
   id?: string;
   title?: string;
@@ -305,22 +290,6 @@ interface SponsorPayload {
   logoUrl?: string;
   targetUrl?: string;
   isActive?: boolean;
-}
-
-export async function createSponsorDb(payload: SponsorPayload, actor: Actor) {
-  const result = await query(
-    `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind)
-     values ($1, $2, $3, $4, true, 'match')
-     returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
-    [
-      requiredText(payload.title, "Naslov sponzora je obavezan."),
-      String(payload.subtitle || "").trim(),
-      String(payload.logoUrl || "").trim(),
-      String(payload.targetUrl || "").trim()
-    ]
-  );
-  await audit(actor, "sponsor.create", "sponsor", result.rows[0].id, { title: result.rows[0].title });
-  return normalizeSponsor(result.rows[0]);
 }
 
 export async function updateSponsorDb(payload: SponsorPayload, actor: Actor) {
@@ -359,6 +328,74 @@ export async function updateSponsorDb(payload: SponsorPayload, actor: Actor) {
 
   if (!result.rows[0]) throw httpError(404, "Sponzor nije pronadjen.");
   await audit(actor, "sponsor.update", "sponsor", result.rows[0].id, { title: result.rows[0].title });
+  return normalizeSponsor(result.rows[0]);
+}
+
+// The Profile screen's "partner discount" card - same single-active-record shape as
+// the weekly sponsor above (reuses the sponsors table with kind='discount' rather than
+// a new table), just editable by admin instead of hardcoded. Returns null when nothing
+// has been configured yet, or when the fan-facing card is turned off (is_active=false),
+// so the card only ever shows once an admin has actually set something up.
+export async function getActiveDiscountDb() {
+  const result = await query(
+    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
+     from public.sponsors
+     where is_active = true and kind = 'discount'
+     order by updated_at desc
+     limit 1`
+  );
+  return result.rows[0] ? normalizeSponsor(result.rows[0]) : null;
+}
+
+// Admin's own edit form needs to see the current record even while it's turned off,
+// otherwise there'd be no way to re-enable it without re-typing everything from scratch.
+export async function getDiscountForAdminDb() {
+  const result = await query(
+    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
+     from public.sponsors
+     where kind = 'discount'
+     order by updated_at desc
+     limit 1`
+  );
+  return result.rows[0] ? normalizeSponsor(result.rows[0]) : null;
+}
+
+export async function updateDiscountDb(payload: SponsorPayload, actor: Actor) {
+  let id = payload.id;
+  if (!id) {
+    const existing = await query("select id from public.sponsors where kind = 'discount' order by updated_at desc limit 1");
+    id = existing.rows[0]?.id;
+  }
+
+  const result = id
+    ? await query(
+        `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, updated_at = now()
+         where id = $1 and kind = 'discount'
+         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+        [
+          id,
+          requiredText(payload.title, "Naslov je obavezan."),
+          String(payload.subtitle || "").trim(),
+          String(payload.logoUrl || "").trim(),
+          String(payload.targetUrl || "").trim(),
+          payload.isActive !== false
+        ]
+      )
+    : await query(
+        `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind)
+         values ($1, $2, $3, $4, $5, 'discount')
+         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+        [
+          requiredText(payload.title, "Naslov je obavezan."),
+          String(payload.subtitle || "").trim(),
+          String(payload.logoUrl || "").trim(),
+          String(payload.targetUrl || "").trim(),
+          payload.isActive !== false
+        ]
+      );
+
+  if (!result.rows[0]) throw httpError(404, "Popust nije pronadjen.");
+  await audit(actor, "discount.update", "sponsor", result.rows[0].id, { title: result.rows[0].title });
   return normalizeSponsor(result.rows[0]);
 }
 
@@ -409,6 +446,19 @@ export async function updateGeneralSponsorDb(id: string, payload: SponsorPayload
   if (!result.rows[0]) throw httpError(404, "Sponzor nije pronadjen.");
   await audit(actor, "sponsor.update", "sponsor", id, { title: result.rows[0].title });
   return normalizeSponsor(result.rows[0]);
+}
+
+export async function deleteGeneralSponsorDb(id: string, actor: Actor) {
+  // matches.sponsor_id references this with ON DELETE SET NULL, so removing a sponsor
+  // that's currently assigned to a match just clears that match's sponsor window
+  // instead of failing - no need to unassign it first.
+  const result = await query(
+    `delete from public.sponsors where id = $1 and kind = 'general' returning id, title`,
+    [id]
+  );
+  if (!result.rows[0]) throw httpError(404, "Sponzor nije pronadjen.");
+  await audit(actor, "sponsor.delete", "sponsor", id, { title: result.rows[0].title });
+  return { id };
 }
 
 async function likeCount(storyId: string): Promise<number> {

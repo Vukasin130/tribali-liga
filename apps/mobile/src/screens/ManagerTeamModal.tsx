@@ -5,6 +5,8 @@ import { fetchFantasySeasonTeamById } from "../api/endpoints";
 import type { FantasySeasonPick, FantasySeasonTeam } from "../api/types";
 import { EmptyState, ErrorState, LoadingState } from "../components/ui";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { Pitch } from "../components/Pitch";
 import { BenchStrip } from "../components/BenchStrip";
 import { BENCH_SLOTS, STARTER_SLOTS } from "../fantasyConstants";
@@ -25,6 +27,7 @@ export function ManagerTeamModal({
   const [team, setTeam] = useState<FantasySeasonTeam | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
 
   function load() {
     setLoading(true);
@@ -52,7 +55,7 @@ export function ManagerTeamModal({
         {error ? <ErrorState message={error} onRetry={load} /> : null}
 
         {team ? (
-          <ScrollView contentContainerStyle={styles.content}>
+          <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
             <Text style={styles.eyebrow}>{managerName || "Menadzer"}</Text>
             <Text style={styles.title}>{team.name}</Text>
             <Text style={styles.subtitle}>{team.totalPoints} poena ukupno</Text>

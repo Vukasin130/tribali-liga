@@ -562,6 +562,12 @@ export async function updateTeam(id: string, payload: TeamPayload, actor: Actor)
     ]
   );
   await audit(actor, "team.update", "team", id, { name: result.rows[0].name });
+  if (payload.logoUrl !== undefined && result.rows[0].club_id) {
+    const trimmedLogo = String(payload.logoUrl || "").trim();
+    if (trimmedLogo) {
+      await query("update public.clubs set logo_url = $2, updated_at = now() where id = $1", [result.rows[0].club_id, trimmedLogo]);
+    }
+  }
   await syncFantasyPoolForTeam(result.rows[0].id, actor);
   if (result.rows[0].competition_id) {
     await recalculateCompetitionStandings({ query } as any, result.rows[0].competition_id);
@@ -725,7 +731,9 @@ async function findOrCreateClub({ name, shortName, logoUrl, cityId }: { name: st
   const created = await query(
     `insert into public.clubs (name, short_name, logo_url, city_id)
      values ($1, $2, $3, $4)
-     on conflict (lower(trim(name))) do update set updated_at = now()
+     on conflict (lower(trim(name))) do update set
+       logo_url = case when excluded.logo_url != '' then excluded.logo_url else public.clubs.logo_url end,
+       updated_at = now()
      returning *`,
     [normalized, String(shortName || "").trim(), String(logoUrl || "").trim(), cityId || null]
   );
@@ -872,7 +880,10 @@ function normalizeMatchSummary(row: any) {
     awayTeamName: row.away_team_name || "",
     homeScore: Number(row.home_score || 0),
     awayScore: Number(row.away_score || 0),
-    venue: row.venue || ""
+    venue: row.venue || "",
+    period: row.period || "",
+    periodStartedAt: row.period_started_at || "",
+    halfLengthMinutes: Number(row.half_length_minutes || 20)
   };
 }
 

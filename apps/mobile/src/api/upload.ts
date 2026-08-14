@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { createUploadTarget } from "./endpoints";
 
@@ -26,13 +27,19 @@ export async function pickAndUploadMedia(purpose: "story" | "news" | "goal" | "l
   const target = await createUploadTarget({ purpose, contentType, sizeBytes: asset.fileSize || 1 });
 
   const form = new FormData();
-  // React Native's fetch/FormData accepts this {uri, name, type} shape directly - no
-  // need to fetch()+blob() the local file first like a browser would.
-  form.append("file", {
-    uri: asset.uri,
-    name: `upload.${contentType.split("/")[1] || "jpg"}`,
-    type: contentType
-  } as unknown as Blob);
+  const fileName = `upload.${contentType.split("/")[1] || "jpg"}`;
+  if (Platform.OS === "web") {
+    // On web, asset.uri is a blob: URL and the browser's real FormData needs an
+    // actual Blob/File - it silently stringifies a {uri,name,type} object instead
+    // of rejecting it, so the bug only ever shows up server-side as a bogus source.
+    const localFile = await fetch(asset.uri);
+    const blob = await localFile.blob();
+    form.append("file", blob, fileName);
+  } else {
+    // Native's fetch/FormData polyfill accepts this {uri, name, type} shape directly -
+    // no need to fetch()+blob() the local file first like the web branch above does.
+    form.append("file", { uri: asset.uri, name: fileName, type: contentType } as unknown as Blob);
+  }
   form.append("api_key", target.apiKey);
   form.append("timestamp", String(target.timestamp));
   form.append("signature", target.signature);

@@ -34,6 +34,15 @@ export async function query<T extends QueryResultRow = any>(text: string, params
   return activePool.query<T>(text, params);
 }
 
+// For tests: closes the pool so a `node --test` run can exit on its own instead of
+// hanging on an open connection. Not used by the running server, which stays up.
+export async function closePool(): Promise<void> {
+  if (!pool) return;
+  const activePool = pool;
+  pool = null;
+  await activePool.end();
+}
+
 export async function transaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
   const activePool = getPool();
   if (!activePool) throw new Error("Supabase baza nije podesena.");

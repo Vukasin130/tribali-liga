@@ -4,6 +4,8 @@ import { updateSponsor } from "../api/endpoints";
 import { pickAndUploadMedia } from "../api/upload";
 import type { Sponsor } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function SponsorEditorModal({
@@ -23,6 +25,7 @@ export function SponsorEditorModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   async function handlePickLogo() {
     setError("");
@@ -60,7 +63,7 @@ export function SponsorEditorModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Sponzor</Text>
 
           <TextInput style={styles.input} placeholder="Naziv sponzora" placeholderTextColor="#9c9186" value={title} onChangeText={setTitle} />
@@ -68,7 +71,7 @@ export function SponsorEditorModal({
           <TextInput style={styles.input} placeholder="Link ka sponzoru (opciono)" placeholderTextColor="#9c9186" value={targetUrl} onChangeText={setTargetUrl} autoCapitalize="none" />
 
           {logoUrl && !photoFailed ? (
-            <Image source={{ uri: logoUrl }} style={styles.logoPreview} onError={() => setPhotoFailed(true)} />
+            <Image source={{ uri: logoUrl }} style={styles.logoPreview} resizeMode="contain" onError={() => setPhotoFailed(true)} />
           ) : null}
           <TouchableOpacity style={styles.pickButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.pickButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni logo" : "Dodaj logo"}</Text>
@@ -99,7 +102,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line
   },
-  logoPreview: { width: 96, height: 96, borderRadius: 16, alignSelf: "center" },
+  logoPreview: { width: 96, height: 96, borderRadius: 16, alignSelf: "center", backgroundColor: "#fff" },
   pickButton: { backgroundColor: colors.surfaceMuted, borderRadius: 14, paddingVertical: 12, alignItems: "center", borderWidth: 1, borderColor: colors.line },
   pickButtonText: { color: colors.purple, fontWeight: "700" },
   error: { color: colors.danger, fontWeight: "700", textAlign: "center" },

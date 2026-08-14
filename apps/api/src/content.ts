@@ -3,22 +3,24 @@ import { hasDatabase } from "./db.ts";
 import {
   createGeneralSponsorDb,
   createNewsPostDb,
-  createSponsorDb,
   createStoryDb,
   createStoryFolderDb,
+  deleteGeneralSponsorDb,
   deleteNewsPostDb,
   deleteStoryDb,
   deleteStoryFolderDb,
+  getActiveDiscountDb,
   getActiveSponsorDb,
+  getDiscountForAdminDb,
   getStoryStatsDb,
   listActiveStoriesDb,
   listGeneralSponsorsDb,
   listPublishedNewsDb,
-  listSponsorsDb,
   listStoryFoldersDb,
   markStoryViewedDb,
   toggleStoryLikeDb,
   updateNewsPostDb,
+  updateDiscountDb,
   updateGeneralSponsorDb,
   updateSponsorDb,
   updateStoryFolderDb
@@ -240,30 +242,6 @@ export async function getActiveSponsor() {
   return mutateDatabase((db) => (db.sponsors as any[]).find((item) => item.isActive !== false) || null);
 }
 
-export async function listSponsors() {
-  if (hasDatabase()) return listSponsorsDb();
-  return mutateDatabase((db) => (db.sponsors as any[]).filter((item) => item.isActive !== false));
-}
-
-export async function createSponsor(payload: any, actor: Actor) {
-  if (hasDatabase()) return createSponsorDb(payload, actor);
-  return mutateDatabase((db) => {
-    const item = {
-      id: randomUUID(),
-      createdAt: timestamp(),
-      updatedAt: timestamp(),
-      title: requiredText(payload.title, "Naslov sponzora je obavezan."),
-      subtitle: String(payload.subtitle || "").trim(),
-      logoUrl: String(payload.logoUrl || "").trim(),
-      targetUrl: String(payload.targetUrl || "").trim(),
-      isActive: true
-    };
-    (db.sponsors as any[]).push(item);
-    audit(db, actor, "sponsor.create", "sponsor", item.id, { title: item.title });
-    return item;
-  });
-}
-
 export async function updateSponsor(payload: any, actor: Actor) {
   if (hasDatabase()) return updateSponsorDb(payload, actor);
   return mutateDatabase((db) => {
@@ -279,6 +257,36 @@ export async function updateSponsor(payload: any, actor: Actor) {
     item.isActive = payload.isActive !== false;
     item.updatedAt = timestamp();
     audit(db, actor, "sponsor.update", "sponsor", item.id, { title: item.title });
+    return item;
+  });
+}
+
+export async function getActiveDiscount() {
+  if (hasDatabase()) return getActiveDiscountDb();
+  return mutateDatabase((db) => (db.sponsors as any[]).find((item) => item.kind === "discount" && item.isActive !== false) || null);
+}
+
+export async function getDiscountForAdmin() {
+  if (hasDatabase()) return getDiscountForAdminDb();
+  return mutateDatabase((db) => (db.sponsors as any[]).find((item) => item.kind === "discount") || null);
+}
+
+export async function updateDiscount(payload: any, actor: Actor) {
+  if (hasDatabase()) return updateDiscountDb(payload, actor);
+  return mutateDatabase((db) => {
+    const sponsors = db.sponsors as any[];
+    let item = sponsors.find((sponsor) => sponsor.id === (payload.id || "discount-partner"));
+    if (!item) {
+      item = { id: payload.id || "discount-partner", createdAt: timestamp(), kind: "discount" };
+      sponsors.push(item);
+    }
+    item.title = requiredText(payload.title, "Naslov je obavezan.");
+    item.subtitle = String(payload.subtitle || "").trim();
+    item.logoUrl = String(payload.logoUrl || "").trim();
+    item.targetUrl = String(payload.targetUrl || "").trim();
+    item.isActive = payload.isActive !== false;
+    item.updatedAt = timestamp();
+    audit(db, actor, "discount.update", "sponsor", item.id, { title: item.title });
     return item;
   });
 }
@@ -320,6 +328,17 @@ export async function updateGeneralSponsor(id: string, payload: any, actor: Acto
     item.updatedAt = timestamp();
     audit(db, actor, "sponsor.update", "sponsor", item.id, { title: item.title });
     return item;
+  });
+}
+
+export async function deleteGeneralSponsor(id: string, actor: Actor) {
+  if (hasDatabase()) return deleteGeneralSponsorDb(id, actor);
+  return mutateDatabase((db) => {
+    const before = (db.sponsors as any[]).length;
+    db.sponsors = (db.sponsors as any[]).filter((item) => item.id !== id);
+    if (before === (db.sponsors as any[]).length) throw httpError(404, "Sponzor nije pronadjen.");
+    audit(db, actor, "sponsor.delete", "sponsor", id, {});
+    return { deleted: true };
   });
 }
 

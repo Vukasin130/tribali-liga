@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useAuth } from "../state/AuthContext";
+import { fetchAllTeams } from "../api/endpoints";
+import type { Team } from "../api/types";
 import { PrimaryButton } from "../components/ui";
 import { colors } from "../theme/colors";
 import type { AuthStackParamList } from "../navigation/types";
@@ -16,14 +18,37 @@ export function RegisterScreen({ navigation }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<RoleChoice>("fan");
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [claimTeamId, setClaimTeamId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [legalScreen, setLegalScreen] = useState<"privacy" | "terms" | null>(null);
+  const [claimError, setClaimError] = useState("");
+
+  // Only fetched once someone actually picks "Verifikovani igrac" - a fan signing up
+  // never needs the team list, so there's no point loading it up front.
+  useEffect(() => {
+    if (role !== "verified_player" || teams.length > 0) return;
+    fetchAllTeams()
+      .then(setTeams)
+      .catch(() => undefined);
+  }, [role, teams.length]);
 
   async function handleRegister() {
+    setClaimError("");
+    if (role === "verified_player" && !claimTeamId) {
+      setClaimError("Izaberi tim da bi nastavio - admin mora znati koga da proveri.");
+      return;
+    }
     setSubmitting(true);
     try {
-      await register({ email: email.trim(), password, displayName: displayName.trim(), roleIntent: role });
+      await register({
+        email: email.trim(),
+        password,
+        displayName: displayName.trim(),
+        roleIntent: role,
+        teamId: role === "verified_player" ? claimTeamId : undefined
+      });
     } catch {
       // surfaced via useAuth().error
     } finally {
@@ -89,6 +114,36 @@ export function RegisterScreen({ navigation }: Props) {
             </TouchableOpacity>
           </View>
 
+          {role === "verified_player" ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>Tvoj tim</Text>
+              <Text style={styles.helperText}>
+                Izaberi tim za koji igras - admin ce ovo proveriti pre nego sto dobijes oznaku verifikovanog igraca.
+              </Text>
+              {teams.length === 0 ? (
+                <Text style={styles.helperText}>Ucitavanje timova...</Text>
+              ) : (
+                <View style={styles.teamPicker}>
+                  {teams.map((team) => (
+                    <TouchableOpacity
+                      key={team.id}
+                      style={[styles.teamChip, claimTeamId === team.id ? styles.teamChipActive : null]}
+                      onPress={() => {
+                        setClaimTeamId(team.id);
+                        setClaimError("");
+                      }}
+                    >
+                      <Text style={[styles.teamChipText, claimTeamId === team.id ? styles.teamChipTextActive : null]} numberOfLines={1}>
+                        {team.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {claimError ? <Text style={styles.error}>{claimError}</Text> : null}
+            </View>
+          ) : null}
+
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <TouchableOpacity style={styles.termsRow} onPress={() => setAcceptedTerms((value) => !value)}>
@@ -107,7 +162,13 @@ export function RegisterScreen({ navigation }: Props) {
             label={submitting ? "Kreiranje..." : "Napravi nalog"}
             onPress={handleRegister}
             loading={submitting}
-            disabled={!acceptedTerms || !displayName.trim() || !email.trim() || password.length < 6}
+            disabled={
+              !acceptedTerms ||
+              !displayName.trim() ||
+              !email.trim() ||
+              password.length < 6 ||
+              (role === "verified_player" && !claimTeamId)
+            }
           />
 
           <View style={styles.footerRow}>
@@ -148,6 +209,9 @@ const styles = StyleSheet.create({
   },
   content: { padding: 20, paddingTop: 56, paddingBottom: 40 },
   card: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
     backgroundColor: "#fff",
     borderRadius: 28,
     padding: 24,
@@ -185,6 +249,23 @@ const styles = StyleSheet.create({
   roleCardActive: { borderColor: colors.purple, backgroundColor: "rgba(201,162,39,0.06)" },
   roleTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
   roleText: { color: colors.textMuted, fontSize: 12, lineHeight: 16 },
+  helperText: { color: colors.textMuted, fontSize: 12, lineHeight: 16 },
+  teamPicker: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  teamChip: {
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: "100%",
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceMuted,
+    paddingVertical: 8,
+    paddingHorizontal: 14
+  },
+  teamChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  teamChipText: { color: colors.textPrimary, fontWeight: "600", fontSize: 13 },
+  teamChipTextActive: { color: "#fff" },
   error: { color: colors.danger, fontWeight: "600" },
   termsRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   checkbox: {

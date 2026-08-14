@@ -4,6 +4,8 @@ import { createNews, updateNews } from "../api/endpoints";
 import { pickAndUploadMedia } from "../api/upload";
 import type { NewsItem } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function NewsComposerModal({
@@ -23,6 +25,7 @@ export function NewsComposerModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   async function handlePickMedia() {
     setError("");
@@ -65,7 +68,7 @@ export function NewsComposerModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>{existingItem ? "Izmeni vest" : "Nova vest"}</Text>
 
           <TextInput

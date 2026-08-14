@@ -719,6 +719,7 @@ model fantasy_seasons {
   starts_at                   DateTime?                     @db.Timestamptz(6)
   ends_at                     DateTime?                     @db.Timestamptz(6)
   fantasy_gameweeks           fantasy_gameweeks[]
+  fantasy_mini_leagues        fantasy_mini_leagues[]
   fantasy_player_pool         fantasy_player_pool[]
   fantasy_season_competitions fantasy_season_competitions[]
   fantasy_teams               fantasy_teams[]
@@ -762,6 +763,7 @@ model fantasy_teams {
   total_points       Int                  @default(0)
   last_scored_at     DateTime?            @db.Timestamptz(6)
   fantasy_season_id  String?              @db.Uuid
+  budget_cap         Decimal              @default(100.00) @db.Decimal(6, 2)
   fantasy_team_picks fantasy_team_picks[]
   competitions       competitions?        @relation(fields: [competition_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   fantasy_seasons    fantasy_seasons?     @relation(fields: [fantasy_season_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1130,28 +1132,30 @@ model players {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model profiles {
-  id                    String                  @id @db.Uuid
-  created_at            DateTime                @default(now()) @db.Timestamptz(6)
-  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
-  email                 String
-  display_name          String
-  avatar_url            String?
-  role                  user_role               @default(fan)
-  verification_status   verification_status     @default(none)
-  verified_player_id    String?                 @db.Uuid
-  push_token            String?
-  audit_logs            audit_logs[]
-  fantasy_teams         fantasy_teams[]
-  goal_polls            goal_polls[]
-  goal_votes            goal_votes[]
-  match_predictions     match_predictions[]
-  news_posts            news_posts[]
-  users                 users                   @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  players               players?                @relation(fields: [verified_player_id], references: [id], onUpdate: NoAction, map: "profiles_verified_player_fk")
-  stories               stories[]
-  story_likes           story_likes[]
-  story_views           story_views[]
-  verification_requests verification_requests[]
+  id                          String                        @id @db.Uuid
+  created_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  email                       String
+  display_name                String
+  avatar_url                  String?
+  role                        user_role                     @default(fan)
+  verification_status         verification_status           @default(none)
+  verified_player_id          String?                       @db.Uuid
+  push_token                  String?
+  audit_logs                  audit_logs[]
+  fantasy_mini_league_members fantasy_mini_league_members[]
+  fantasy_mini_leagues        fantasy_mini_leagues[]
+  fantasy_teams               fantasy_teams[]
+  goal_polls                  goal_polls[]
+  goal_votes                  goal_votes[]
+  match_predictions           match_predictions[]
+  news_posts                  news_posts[]
+  users                       users                         @relation(fields: [id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  players                     players?                      @relation(fields: [verified_player_id], references: [id], onUpdate: NoAction, map: "profiles_verified_player_fk")
+  stories                     stories[]
+  story_likes                 story_likes[]
+  story_views                 story_views[]
+  verification_requests       verification_requests[]
 
   @@schema("public")
 }
@@ -1332,6 +1336,35 @@ model verification_requests {
   teams       teams?              @relation(fields: [team_id], references: [id], onUpdate: NoAction)
   profiles    profiles?           @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@schema("public")
+}
+
+model fantasy_mini_league_members {
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  created_at             DateTime             @default(now()) @db.Timestamptz(6)
+  fantasy_mini_league_id String               @db.Uuid
+  user_id                String               @db.Uuid
+  fantasy_mini_leagues   fantasy_mini_leagues @relation(fields: [fantasy_mini_league_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  profiles               profiles             @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([fantasy_mini_league_id, user_id], map: "fantasy_mini_league_members_unique")
+  @@index([user_id], map: "fantasy_mini_league_members_user_idx")
+  @@schema("public")
+}
+
+model fantasy_mini_leagues {
+  id                          String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  created_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  updated_at                  DateTime                      @default(now()) @db.Timestamptz(6)
+  fantasy_season_id           String                        @db.Uuid
+  creator_user_id             String                        @db.Uuid
+  name                        String
+  invite_code                 String                        @unique
+  fantasy_mini_league_members fantasy_mini_league_members[]
+  profiles                    profiles                      @relation(fields: [creator_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  fantasy_seasons             fantasy_seasons               @relation(fields: [fantasy_season_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([fantasy_season_id], map: "fantasy_mini_leagues_season_idx")
   @@schema("public")
 }
 

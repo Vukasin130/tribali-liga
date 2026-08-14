@@ -51,20 +51,6 @@ export function groupMatchesByDay(matches: MatchSummary[]): { key: string; title
   return Array.from(groups.values());
 }
 
-export function fixtureTime(match: MatchSummary): string {
-  if (match.status === "finished") return `${match.homeScore} : ${match.awayScore}`;
-  if (match.status === "live") return "LIVE";
-  const date = new Date(match.scheduledAt);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleTimeString("sr-RS", { hour: "2-digit", minute: "2-digit" });
-}
-
-export function fixtureMeta(match: MatchSummary): string {
-  if (match.status === "finished") return "Odigrano";
-  if (match.status === "live") return "Uzivo";
-  return "Zakazano";
-}
-
 // All the "Seasons" screen's data-fetching, mutations and derived state, shared verbatim
 // between the mobile screen (apps/mobile) and the desktop layout (apps/desktop) - each
 // renders its own JSX from this same hook's return value, so there is exactly one copy
@@ -72,7 +58,13 @@ export function fixtureMeta(match: MatchSummary): string {
 export function useSeasonsScreenState() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const { competitions, competitionId, setCompetitionId, reload: reloadCompetitions } = useCompetition();
+  const {
+    competitions,
+    competitionId,
+    setCompetitionId,
+    reload: reloadCompetitions,
+    loading: competitionsLoading
+  } = useCompetition();
   const queryClient = useQueryClient();
   const [error, setError] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -97,9 +89,12 @@ export function useSeasonsScreenState() {
     enabled: Boolean(competitionId)
   });
   const hub: SeasonHub | null = hubQuery.data ?? null;
-  // Mirrors the original: while no league is selected yet, stay in the loading state
-  // rather than briefly flashing an empty screen.
-  const loading = !competitionId || hubQuery.isLoading;
+  // While the competitions list itself is still loading, or a league is selected and
+  // its hub data hasn't arrived yet, show the loading state rather than briefly
+  // flashing an empty screen. But once the competitions list has genuinely loaded and
+  // there is no competition to select (a fresh install with no leagues yet), that is
+  // not "still loading" - stop spinning and let the empty state render instead.
+  const loading = competitionsLoading || (Boolean(competitionId) && hubQuery.isLoading);
 
   useEffect(() => {
     if (hubQuery.isSuccess) setError("");
@@ -294,8 +289,6 @@ export function useSeasonsScreenState() {
     prepareKnockoutMutation.isPending ||
     advanceKnockoutMutation.isPending;
 
-  const liveMatches = (hub?.matches ?? []).filter((match) => match.status === "live");
-
   // Group by the match's own round number rather than gameweekId - imported/legacy
   // matches and ad-hoc "Zakazi utakmicu" matches often never get bucketed into a
   // gameweek, but round is always populated once a schedule (robin or manual) exists.
@@ -463,7 +456,6 @@ export function useSeasonsScreenState() {
     advanceKnockoutMutation,
     handleAdvanceKnockout,
     tournamentBusy,
-    liveMatches,
     roundNumbers,
     unroundedMatches,
     roundMatches,

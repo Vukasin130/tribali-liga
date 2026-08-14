@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { NewsItem } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { InlineVideo } from "../components/InlineVideo";
 
 export function NewsDetailModal({
@@ -16,10 +18,11 @@ export function NewsDetailModal({
   onDelete?: () => void;
 }) {
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           {item.mediaUrl ? (
             item.mediaType === "video" ? (
               <InlineVideo key={item.id} uri={item.mediaUrl} style={styles.image} controls />

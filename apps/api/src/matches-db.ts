@@ -52,7 +52,7 @@ export async function getMatchDetailDb(matchId: string, user?: Actor | null) {
   const [lineups, events, stats, media, predictions] = await Promise.all([
     query(
       `select l.id, l.created_at, l.updated_at, l.match_id, l.team_id, t.name as team_name,
-              l.player_id, p.display_name as player_name, p.position, l.is_starter, l.is_goalkeeper,
+              l.player_id, p.display_name as player_name, p.position, p.avatar_url, l.is_starter, l.is_goalkeeper,
               l.pitch_x, l.pitch_y, l.shirt_number
        from public.match_lineups l
        left join public.teams t on t.id = l.team_id
@@ -433,22 +433,29 @@ export async function addMatchEventDb(matchId: string, payload: MatchEventPayloa
   };
 }
 
+// One media link per (match, kind) - re-saving (e.g. correcting a stream URL) replaces
+// the previous row for that kind rather than piling up duplicates. There's no `id` to
+// conflict on for a fresh insert, so the upsert has to be keyed on (match_id, kind)
+// explicitly via delete-then-insert inside a transaction.
 export async function setMatchMediaDb(matchId: string, payload: { kind?: string; label?: string; url?: string }, actor: Actor) {
   const kind = mediaKind(payload.kind || "youtube");
-  const result = await query(
-    `insert into public.media_links (match_id, kind, label, url)
-     values ($1, $2, $3, $4)
-     on conflict (id) do update set label = excluded.label, url = excluded.url, updated_at = now()
-     returning id, created_at, updated_at, match_id, kind, label, url`,
-    [
-      matchId,
-      kind,
-      String(payload.label || "Snimak utakmice").trim(),
-      requiredText(payload.url, "Media link je obavezan.")
-    ]
-  );
-  await audit(actor, "match.media.upsert", "mediaLink", result.rows[0].id, { matchId, kind });
-  return normalizeMedia(result.rows[0]);
+  const label = String(payload.label || "Snimak utakmice").trim();
+  const url = requiredText(payload.url, "Media link je obavezan.");
+
+  const row = await transaction(async (client) => {
+    await ensureMatch(client, matchId);
+    await client.query("delete from public.media_links where match_id = $1 and kind = $2", [matchId, kind]);
+    const result = await client.query(
+      `insert into public.media_links (match_id, kind, label, url)
+       values ($1, $2, $3, $4)
+       returning id, created_at, updated_at, match_id, kind, label, url`,
+      [matchId, kind, label, url]
+    );
+    return result.rows[0];
+  });
+
+  await audit(actor, "match.media.upsert", "mediaLink", row.id, { matchId, kind });
+  return normalizeMedia(row);
 }
 
 interface CreateMatchPayload {
@@ -894,6 +901,7 @@ function normalizeLineup(row: any) {
     playerId: row.player_id,
     playerName: row.player_name || "",
     position: row.position || "",
+    avatarUrl: row.avatar_url || "",
     isStarter: row.is_starter,
     isGoalkeeper: row.is_goalkeeper,
     startedOnBench: !row.is_starter,

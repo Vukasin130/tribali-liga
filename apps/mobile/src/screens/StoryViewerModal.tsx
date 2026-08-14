@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { deleteStory, fetchStoryStats, markStoryViewed, toggleStoryLike } from "../api/endpoints";
 import type { StoryFolder, StoryStats } from "../api/types";
 import { colors } from "../theme/colors";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
 function StoryVideo({
   uri,
@@ -72,6 +73,7 @@ export function StoryViewerModal({
   const [photoFailed, setPhotoFailed] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const seenRef = useRef<Set<string>>(new Set());
+  const isWide = useIsWideScreen();
 
   const folder = folders[folderIndex];
   const story = folder?.stories[storyIndex];
@@ -169,7 +171,8 @@ export function StoryViewerModal({
 
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={styles.screen}>
+      <View style={styles.backdrop}>
+      <View style={[styles.screen, isWide ? styles.screenWide : null]}>
         <View style={styles.progressRow}>
           {folder.stories.map((item, index) => (
             <View key={item.id} style={styles.progressTrack}>
@@ -274,12 +277,15 @@ export function StoryViewerModal({
           </View>
         ) : null}
       </View>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#000" },
+  backdrop: { flex: 1, backgroundColor: "#000", alignItems: "center" },
+  screen: { flex: 1, width: "100%", backgroundColor: "#000" },
+  screenWide: { width: 420, maxWidth: "100%" },
   progressRow: { flexDirection: "row", gap: 4, paddingTop: 54, paddingHorizontal: 10 },
   progressTrack: { flex: 1, height: 3, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.3)", overflow: "hidden" },
   progressFill: { height: 3, backgroundColor: "#fff" },

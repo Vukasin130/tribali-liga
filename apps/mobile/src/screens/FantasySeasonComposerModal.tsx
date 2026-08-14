@@ -3,6 +3,8 @@ import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 import { createFantasySeason, listCompetitions, updateFantasySeason } from "../api/endpoints";
 import type { Competition, FantasySeason } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function FantasySeasonComposerModal({
@@ -21,6 +23,7 @@ export function FantasySeasonComposerModal({
   const [competitionIds, setCompetitionIds] = useState<string[]>(season?.competitions?.map((c) => c.id) || []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
 
   useEffect(() => {
     listCompetitions()
@@ -64,7 +67,7 @@ export function FantasySeasonComposerModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>{isEditing ? "Izmeni fantasy sezonu" : "Nova fantasy sezona"}</Text>
           <Text style={styles.subtitle}>
             Jedna fantasy sezona moze da obuhvati vise liga odjednom - korisnici prave jedan tim iz zajednickog bazena igraca svih izabranih liga.

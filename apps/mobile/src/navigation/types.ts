@@ -9,5 +9,6 @@ export type MainTabParamList = {
   Fantasy: undefined;
   Seasons: undefined;
   Explore: undefined;
+  Statistics: undefined;
   Profile: undefined;
 };

@@ -1,12 +1,13 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./client";
 import type {
+  AnalyticsOverview,
   AuthSession,
   AuthUser,
   City,
   Club,
   Competition,
   CompetitionSetup,
-  FantasyGameweek,
+  FantasyMiniLeague,
   FantasySeason,
   FantasySeasonPoolPlayer,
   FantasySeasonTeam,
@@ -17,6 +18,7 @@ import type {
   MatchAvailabilityRequest,
   MatchDetail,
   MatchSummary,
+  MediaLink,
   NewsFeed,
   NewsItem,
   Player,
@@ -96,7 +98,7 @@ export function fetchStoryFolders() {
   return apiGet<StoryFolder[]>("/stories/folders");
 }
 
-export function register(payload: { email: string; password: string; displayName: string; roleIntent?: string }) {
+export function register(payload: { email: string; password: string; displayName: string; roleIntent?: string; teamId?: string }) {
   return apiPost<AuthUser>("/auth/register", payload);
 }
 
@@ -207,6 +209,10 @@ export function updateMatch(
 
 export function setMatchPeriod(matchId: string, period: "first_half" | "halftime" | "second_half") {
   return apiPatch<MatchDetail>(`/admin/matches/${matchId}/period`, { period });
+}
+
+export function setMatchMedia(matchId: string, payload: { kind?: string; label?: string; url: string }) {
+  return apiPatch<MediaLink>(`/admin/matches/${matchId}/media`, payload);
 }
 
 export interface CompetitionPhaseInput {
@@ -340,6 +346,35 @@ export function fetchFantasySeasonLeaderboard(seasonId: string, gameweekId?: str
   return apiGet<LeaderboardEntry[]>(`/fantasy-seasons/leaderboard?${params.toString()}`);
 }
 
+export function listMyFantasyMiniLeagues(seasonId: string) {
+  return apiGet<FantasyMiniLeague[]>(`/fantasy-mini-leagues?${new URLSearchParams({ fantasySeasonId: seasonId }).toString()}`);
+}
+
+export function createFantasyMiniLeague(payload: { fantasySeasonId: string; name: string }) {
+  return apiPost<FantasyMiniLeague>("/fantasy-mini-leagues", payload);
+}
+
+export function joinFantasyMiniLeague(inviteCode: string) {
+  return apiPost<FantasyMiniLeague>("/fantasy-mini-leagues/join", { inviteCode });
+}
+
+export function fetchFantasyMiniLeague(miniLeagueId: string) {
+  return apiGet<FantasyMiniLeague>(`/fantasy-mini-leagues/${miniLeagueId}`);
+}
+
+export function fetchFantasyMiniLeagueLeaderboard(miniLeagueId: string, gameweekId?: string) {
+  const params = gameweekId ? `?${new URLSearchParams({ fantasyGameweekId: gameweekId }).toString()}` : "";
+  return apiGet<LeaderboardEntry[]>(`/fantasy-mini-leagues/${miniLeagueId}/leaderboard${params}`);
+}
+
+export function leaveFantasyMiniLeague(miniLeagueId: string) {
+  return apiPost<{ ok: true }>(`/fantasy-mini-leagues/${miniLeagueId}/leave`, {});
+}
+
+export function disbandFantasyMiniLeague(miniLeagueId: string) {
+  return apiDelete<{ ok: true }>(`/fantasy-mini-leagues/${miniLeagueId}`);
+}
+
 export function createFantasySeason(payload: {
   name: string;
   competitionIds: string[];
@@ -368,29 +403,6 @@ export function setFantasyPoolPlayerPrice(seasonId: string, playerId: string, pr
 
 export function setFantasyPoolPlayerAvailability(seasonId: string, playerId: string, isAvailable: boolean) {
   return apiPatch<FantasySeasonPoolPlayer>(`/admin/fantasy-seasons/${seasonId}/pool/${playerId}/availability`, { isAvailable });
-}
-
-export function createFantasyGameweek(payload: {
-  fantasySeasonId: string;
-  name: string;
-  startsAt: string;
-  locksAt: string;
-  endsAt?: string;
-  status?: string;
-}) {
-  return apiPost<FantasyGameweek>("/admin/fantasy-gameweeks", payload);
-}
-
-export function updateFantasyGameweek(id: string, payload: Partial<{ name: string; startsAt: string; locksAt: string; endsAt: string; status: string }>) {
-  return apiPatch<FantasyGameweek>(`/admin/fantasy-gameweeks/${id}`, payload);
-}
-
-export function scoreFantasySeasonGameweek(id: string) {
-  return apiPost<{ gameweekId: string; updatedPicks: number; pricedPlayers: number }>(`/admin/fantasy-gameweeks/${id}/score`);
-}
-
-export function autoGenerateFantasyGameweeks(seasonId: string) {
-  return apiPost<{ created: number; refreshed: number; total: number }>(`/admin/fantasy-seasons/${seasonId}/gameweeks/autogenerate`);
 }
 
 export function fetchCurrentGoalPoll() {
@@ -427,12 +439,16 @@ export function updateSponsor(payload: { id?: string; title: string; subtitle?: 
   return apiPatch<Sponsor>("/admin/sponsor", payload);
 }
 
-export function fetchSponsors() {
-  return apiGet<Sponsor[]>("/sponsors");
+export function fetchDiscount() {
+  return apiGet<Sponsor | null>("/discount");
 }
 
-export function createSponsor(payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string }) {
-  return apiPost<Sponsor>("/admin/sponsors", payload);
+export function fetchDiscountForAdmin() {
+  return apiGet<Sponsor | null>("/admin/discount");
+}
+
+export function updateDiscount(payload: { id?: string; title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }) {
+  return apiPatch<Sponsor>("/admin/discount", payload);
 }
 
 export function fetchGeneralSponsors() {
@@ -452,6 +468,10 @@ export function updateGeneralSponsor(
   payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }
 ) {
   return apiPatch<Sponsor>(`/admin/sponsors/general/${id}`, payload);
+}
+
+export function deleteGeneralSponsor(id: string) {
+  return apiDelete<{ id: string }>(`/admin/sponsors/general/${id}`);
 }
 
 export function markStoryViewed(storyId: string) {
@@ -484,6 +504,17 @@ export function fetchMyVerificationRequests() {
 
 export function requestVerification(payload: { teamId?: string; playerId?: string; playerName: string }) {
   return apiPost<VerificationRequest>("/profile/verifications", payload);
+}
+
+export function listVerificationRequests(status?: string) {
+  return apiGet<VerificationRequest[]>(`/admin/verifications${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+}
+
+export function reviewVerificationRequest(
+  id: string,
+  payload: { status: "approved" | "rejected"; playerId?: string; teamId?: string; adminNote?: string }
+) {
+  return apiPatch<VerificationRequest>(`/admin/verifications/${id}`, payload);
 }
 
 export function fetchTeamPlayers(teamId: string) {
@@ -520,4 +551,8 @@ export function fetchLeaders(competitionId: string, category: "goals" | "assists
 
 export function fetchCompetitionStandings(competitionId: string) {
   return apiGet<StandingGroup[]>(`/competitions/${competitionId}/standings`);
+}
+
+export function fetchAnalyticsOverview() {
+  return apiGet<AnalyticsOverview>("/admin/analytics/overview");
 }

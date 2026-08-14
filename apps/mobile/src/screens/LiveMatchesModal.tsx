@@ -2,12 +2,18 @@ import React, { useState } from "react";
 import { Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { listLiveMatches } from "../api/endpoints";
-import { Card, EmptyState, ErrorState, LoadingState, Pill } from "../components/ui";
+import { EmptyState, ErrorState, LoadingState } from "../components/ui";
+import { FixtureCard } from "../components/FixtureCard";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { MatchDetailModal } from "./MatchDetailModal";
+import { TeamProfileModal } from "./TeamProfileModal";
 
 export function LiveMatchesModal({ onClose }: { onClose: () => void }) {
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+  const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
+  const isWide = useIsWideScreen();
 
   const {
     data: matches = [],
@@ -37,31 +43,28 @@ export function LiveMatchesModal({ onClose }: { onClose: () => void }) {
           <LoadingState label="Ucitavanje utakmica..." />
         ) : (
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, isWide ? wideContent : null]}
             refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} tintColor={colors.purple} />}
           >
             {error ? <ErrorState message={error} onRetry={() => refetch()} /> : null}
             {!error && matches.length === 0 ? <EmptyState message="Trenutno nema live utakmica." /> : null}
             {matches.map((match) => (
-              <TouchableOpacity key={match.id} onPress={() => setActiveMatchId(match.id)}>
-                <Card style={styles.matchCard}>
-                  <View style={styles.matchCardHead}>
-                    <Pill label="LIVE" tone="live" />
-                    {match.competitionName ? <Text style={styles.matchMeta}>{match.competitionName}</Text> : null}
-                  </View>
-                  <View style={styles.matchRow}>
-                    <Text style={styles.matchTeam} numberOfLines={1}>{match.homeTeamShortName || match.homeTeamName}</Text>
-                    <Text style={styles.matchScore}>{match.homeScore} : {match.awayScore}</Text>
-                    <Text style={styles.matchTeam} numberOfLines={1}>{match.awayTeamShortName || match.awayTeamName}</Text>
-                  </View>
-                </Card>
-              </TouchableOpacity>
+              <View key={match.id} style={styles.matchCardWrap}>
+                {match.competitionName ? <Text style={styles.matchMeta}>{match.competitionName}</Text> : null}
+                <FixtureCard
+                  match={match}
+                  wide={isWide}
+                  onOpenMatch={() => setActiveMatchId(match.id)}
+                  onOpenTeam={setActiveTeamId}
+                />
+              </View>
             ))}
           </ScrollView>
         )}
       </View>
 
       {activeMatchId ? <MatchDetailModal matchId={activeMatchId} onClose={() => setActiveMatchId(null)} /> : null}
+      {activeTeamId ? <TeamProfileModal teamId={activeTeamId} onClose={() => setActiveTeamId(null)} /> : null}
     </Modal>
   );
 }
@@ -79,10 +82,6 @@ const styles = StyleSheet.create({
   headerTitle: { color: colors.ink, fontSize: 22, fontWeight: "700" },
   closeText: { color: colors.purple, fontWeight: "700" },
   content: { padding: 20, paddingTop: 6, gap: 12, paddingBottom: 60 },
-  matchCard: { gap: 10 },
-  matchCardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  matchMeta: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
-  matchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  matchTeam: { flex: 1, color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
-  matchScore: { color: colors.ink, fontWeight: "900", fontSize: 20, marginHorizontal: 8 }
+  matchCardWrap: { gap: 6 },
+  matchMeta: { color: colors.textMuted, fontSize: 12, fontWeight: "600" }
 });

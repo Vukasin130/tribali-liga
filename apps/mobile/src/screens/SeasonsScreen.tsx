@@ -2,13 +2,13 @@ import React from "react";
 import { Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import type { MatchSummary } from "../api/types";
-import { Card, EmptyState, ErrorState, LoadingState, Pill, SectionTitle } from "../components/ui";
+import { Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "../components/ui";
 import { StandingsTable } from "../components/StandingsTable";
-import { TeamCrest } from "../components/TeamCrest";
+import { FixtureCard } from "../components/FixtureCard";
 import { SponsorStrip } from "../components/SponsorStrip";
 import { colors } from "../theme/colors";
-import { useSeasonsScreenState, fixtureMeta, fixtureTime, formatShortDate } from "./useSeasonsScreenState";
+import { useSeasonsScreenState, formatShortDate } from "./useSeasonsScreenState";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
 export function SeasonsScreen() {
   const {
@@ -56,7 +56,6 @@ export function SeasonsScreen() {
     advanceKnockoutMutation,
     handleAdvanceKnockout,
     tournamentBusy,
-    liveMatches,
     roundNumbers,
     roundMatches,
     roundLabel,
@@ -65,6 +64,7 @@ export function SeasonsScreen() {
     error,
     modals
   } = useSeasonsScreenState();
+  const isWide = useIsWideScreen();
 
   return (
     <>
@@ -84,7 +84,7 @@ export function SeasonsScreen() {
           </TouchableOpacity>
           <View style={styles.heroTitleRow}>
             <Text style={styles.heroTitle}>{hub?.activeCompetition?.seasonName ?? "Sezona"}</Text>
-            {isAdmin ? (
+            {isAdmin && isWide ? (
               <View style={styles.heroButtonsRow}>
                 {hub?.activeCompetition ? (
                   <TouchableOpacity style={styles.editLeagueButton} onPress={() => setShowLeagueEditor(true)}>
@@ -113,7 +113,7 @@ export function SeasonsScreen() {
           <LoadingState label="Ucitavanje..." />
         ) : (
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, isWide ? styles.contentWide : null]}
             refreshControl={<RefreshControl refreshing={hubQuery.isRefetching} onRefresh={() => hubQuery.refetch()} tintColor={colors.purple} />}
           >
             {error ? <ErrorState message={error} onRetry={() => hubQuery.refetch()} /> : null}
@@ -121,7 +121,16 @@ export function SeasonsScreen() {
             {tab === "matches" ? (
               <>
                 {isAdmin && hub?.activeCompetition ? (
-                  <Card style={styles.adminTeamsCard}>
+                  <View style={styles.section}>
+                    <TouchableOpacity style={styles.liveAdminButton} onPress={() => setShowLiveAdmin(true)}>
+                      <Ionicons name="radio-outline" size={16} color="#fff" />
+                      <Text style={styles.liveAdminButtonText}>Vodi live utakmicu</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : null}
+
+                {isAdmin && isWide && hub?.activeCompetition ? (
+                  <Card style={[styles.adminTeamsCard, styles.adminTeamsCardWide]}>
                     <SectionTitle eyebrow="Admin" title="Ekipe u ligi" />
                     {teams.length === 0 ? (
                       <Text style={styles.adminHint}>Ova liga jos nema ekipe. Dodaj bar dve da bi mogao da zakazujes utakmice.</Text>
@@ -153,11 +162,6 @@ export function SeasonsScreen() {
                         <Text style={styles.adminActionButtonPrimaryText}>Zakazi utakmicu</Text>
                       </TouchableOpacity>
                     </View>
-
-                    <TouchableOpacity style={styles.liveAdminButton} onPress={() => setShowLiveAdmin(true)}>
-                      <Ionicons name="radio-outline" size={16} color="#fff" />
-                      <Text style={styles.liveAdminButtonText}>Vodi live utakmicu</Text>
-                    </TouchableOpacity>
 
                     <View style={styles.startDateField}>
                       <Text style={styles.startDateLabel}>Datum pocetka (opciono)</Text>
@@ -280,24 +284,6 @@ export function SeasonsScreen() {
                   </Card>
                 ) : null}
 
-                {liveMatches.length > 0 ? (
-                  <View style={styles.section}>
-                    <SectionTitle eyebrow="Sada" title="Live utakmice" />
-                    {liveMatches.map((match) => (
-                      <TouchableOpacity key={match.id} onPress={() => setActiveMatchId(match.id)}>
-                        <Card style={styles.matchCard}>
-                          <Pill label="LIVE" tone="live" />
-                          <View style={styles.matchRow}>
-                            <Text style={styles.matchTeam}>{match.homeTeamShortName || match.homeTeamName}</Text>
-                            <Text style={styles.matchScore}>{match.homeScore} : {match.awayScore}</Text>
-                            <Text style={styles.matchTeam}>{match.awayTeamShortName || match.awayTeamName}</Text>
-                          </View>
-                        </Card>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : null}
-
                 {roundNumbers.length > 0 ? (
                   <View style={styles.roundNav}>
                     <TouchableOpacity
@@ -334,14 +320,17 @@ export function SeasonsScreen() {
                   {roundDayGroups.map((group) => (
                     <View key={group.key} style={styles.dayGroup}>
                       <Text style={styles.dayTitle}>{group.title}</Text>
-                      {group.matches.map((match) => (
-                        <FixtureCard
-                          key={match.id}
-                          match={match}
-                          onOpenMatch={() => setActiveMatchId(match.id)}
-                          onOpenTeam={setActiveTeamId}
-                        />
-                      ))}
+                      <View style={isWide ? styles.fixtureGrid : styles.fixtureList}>
+                        {group.matches.map((match) => (
+                          <FixtureCard
+                            key={match.id}
+                            match={match}
+                            wide={isWide}
+                            onOpenMatch={() => setActiveMatchId(match.id)}
+                            onOpenTeam={setActiveTeamId}
+                          />
+                        ))}
+                      </View>
                     </View>
                   ))}
                 </View>
@@ -352,14 +341,17 @@ export function SeasonsScreen() {
                     {unroundedDayGroups.map((group) => (
                       <View key={group.key} style={styles.dayGroup}>
                         <Text style={styles.dayTitle}>{group.title}</Text>
-                        {group.matches.map((match) => (
-                          <FixtureCard
-                            key={match.id}
-                            match={match}
-                            onOpenMatch={() => setActiveMatchId(match.id)}
-                            onOpenTeam={setActiveTeamId}
-                          />
-                        ))}
+                        <View style={isWide ? styles.fixtureGrid : styles.fixtureList}>
+                          {group.matches.map((match) => (
+                            <FixtureCard
+                              key={match.id}
+                              match={match}
+                              wide={isWide}
+                              onOpenMatch={() => setActiveMatchId(match.id)}
+                              onOpenTeam={setActiveTeamId}
+                            />
+                          ))}
+                        </View>
                       </View>
                     ))}
                   </View>
@@ -368,9 +360,13 @@ export function SeasonsScreen() {
             ) : (
               <View style={styles.section}>
                 {(hub?.standings ?? []).length === 0 ? <EmptyState message="Tabela jos nije dostupna." /> : null}
-                {(hub?.standings ?? []).map((group) => (
-                  <StandingsTable key={group.name} groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
-                ))}
+                <View style={isWide ? styles.standingsGrid : undefined}>
+                  {(hub?.standings ?? []).map((group) => (
+                    <View key={group.name} style={isWide ? styles.standingsGridItem : undefined}>
+                      <StandingsTable groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
+                    </View>
+                  ))}
+                </View>
               </View>
             )}
 
@@ -405,56 +401,6 @@ export function SeasonsScreen() {
       </View>
       {modals}
     </>
-  );
-}
-
-function FixtureCard({
-  match,
-  onOpenMatch,
-  onOpenTeam
-}: {
-  match: MatchSummary;
-  onOpenMatch: () => void;
-  onOpenTeam: (teamId: string) => void;
-}) {
-  return (
-    <TouchableOpacity style={styles.fixtureCard} onPress={onOpenMatch} activeOpacity={0.85}>
-      <FixtureTeam teamId={match.homeTeamId} name={match.homeTeamName || "Domacin"} logoUrl={match.homeTeamLogoUrl} label="Domacin" onPress={onOpenTeam} />
-      <View style={styles.fixtureCenter}>
-        <View style={[styles.fixtureAccent, match.status === "live" ? styles.fixtureAccentLive : null]} />
-        <Text style={[styles.fixtureTime, match.status === "live" ? styles.fixtureTimeLive : null]}>{fixtureTime(match)}</Text>
-        <Text style={styles.fixtureMeta}>{fixtureMeta(match)}</Text>
-      </View>
-      <FixtureTeam teamId={match.awayTeamId} name={match.awayTeamName || "Gost"} logoUrl={match.awayTeamLogoUrl} label="Gost" onPress={onOpenTeam} />
-    </TouchableOpacity>
-  );
-}
-
-function FixtureTeam({
-  teamId,
-  name,
-  logoUrl,
-  label,
-  onPress
-}: {
-  teamId: string;
-  name: string;
-  logoUrl?: string;
-  label: string;
-  onPress: (teamId: string) => void;
-}) {
-  const content = (
-    <>
-      <TeamCrest teamId={teamId || name} name={name} logoUrl={logoUrl} size={30} />
-      <Text style={styles.fixtureTeamName} numberOfLines={2}>{name}</Text>
-      <Text style={styles.fixtureTeamLabel}>{label}</Text>
-    </>
-  );
-  if (!teamId) return <View style={styles.fixtureTeam}>{content}</View>;
-  return (
-    <TouchableOpacity style={styles.fixtureTeam} onPress={() => onPress(teamId)}>
-      {content}
-    </TouchableOpacity>
   );
 }
 
@@ -507,8 +453,14 @@ const styles = StyleSheet.create({
   tabButtonText: { color: colors.textMuted, fontWeight: "600", fontSize: 14 },
   tabButtonTextActive: { color: colors.ink, fontWeight: "700" },
   content: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 40, gap: 18 },
+  contentWide: { paddingHorizontal: 32, gap: 24 },
   section: { gap: 10 },
   adminTeamsCard: { gap: 12 },
+  adminTeamsCardWide: { maxWidth: 640, alignSelf: "center", width: "100%" },
+  fixtureGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  fixtureList: { gap: 10 },
+  standingsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  standingsGridItem: { flexBasis: 420, flexGrow: 1 },
   adminHint: { color: colors.textMuted, fontWeight: "600", fontSize: 13 },
   startDateField: { gap: 6, marginBottom: 4 },
   startDateLabel: { color: colors.ink, fontWeight: "700", fontSize: 13 },
@@ -598,36 +550,8 @@ const styles = StyleSheet.create({
   roundNavCopy: { color: colors.textMuted, fontWeight: "600", fontSize: 12, marginTop: 2 },
   dayGroup: { gap: 10, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: colors.line },
   dayTitle: { color: colors.ink, fontWeight: "800", fontSize: 17 },
-  fixtureCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: 14,
-    borderRadius: 18,
-    backgroundColor: "#fff",
-    shadowColor: "#141414",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: colors.cardBorder
-  },
-  fixtureTeam: { flex: 1, gap: 4, alignItems: "center" },
-  fixtureTeamName: { color: colors.textPrimary, fontWeight: "700", fontSize: 13, textAlign: "center" },
-  fixtureTeamLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "500" },
-  fixtureCenter: { width: 76, alignItems: "center", gap: 3 },
-  fixtureAccent: { width: 30, height: 3, borderRadius: 999, backgroundColor: colors.aqua, marginBottom: 2 },
-  fixtureAccentLive: { backgroundColor: colors.live },
-  fixtureTime: { color: "#141414", fontWeight: "800", fontSize: 18 },
-  fixtureTimeLive: { color: colors.live },
-  fixtureMeta: { color: colors.textMuted, fontSize: 11, fontWeight: "500" },
-  matchCard: { gap: 10 },
   matchCardCompact: { gap: 6 },
-  matchRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  matchTeam: { flex: 1, color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
   matchTeamCompact: { flex: 1, color: colors.textPrimary, fontWeight: "600", fontSize: 13 },
-  matchScore: { color: colors.pink, fontWeight: "700", fontSize: 22, marginHorizontal: 10 },
   matchScoreCompact: { color: colors.pink, fontWeight: "700", fontSize: 15, marginHorizontal: 10 },
   matchVs: { color: colors.textMuted, fontWeight: "600", marginHorizontal: 8 },
   matchDate: { color: colors.textMuted, fontSize: 12 },

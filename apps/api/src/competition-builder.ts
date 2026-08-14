@@ -1023,7 +1023,10 @@ function normalizeMatch(row: any) {
     homeTeamName: row.home_team_name || "",
     awayTeamName: row.away_team_name || "",
     homeScore: Number(row.home_score || 0),
-    awayScore: Number(row.away_score || 0)
+    awayScore: Number(row.away_score || 0),
+    period: row.period || "",
+    periodStartedAt: row.period_started_at || "",
+    halfLengthMinutes: Number(row.half_length_minutes || 20)
   };
 }
 

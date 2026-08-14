@@ -4,6 +4,8 @@ import { addPlayerToTeam, createPlayer, searchPlayers, updatePlayer } from "../a
 import { pickAndUploadMedia } from "../api/upload";
 import type { Player } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { Card, PrimaryButton } from "../components/ui";
 
 const POSITIONS = [
@@ -34,6 +36,7 @@ export function PlayerEditorModal({
   const [searchResults, setSearchResults] = useState<Player[]>([]);
   const [attaching, setAttaching] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   // Only relevant for "new player on this team" - lets the admin find and reuse
   // an existing identity (same person already on another team) instead of
@@ -115,7 +118,7 @@ export function PlayerEditorModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>{isEditing ? "Izmeni igraca" : "Novi igrac"}</Text>
 
           {avatarUrl && !photoFailed ? (

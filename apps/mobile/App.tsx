@@ -6,6 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./src/api/queryClient";
 import { AuthProvider } from "./src/state/AuthContext";
+import { LayoutModeProvider } from "./src/state/LayoutModeContext";
 import { RootNavigator } from "./src/navigation/RootNavigator";
 
 // On web, the app is designed phone-only - always render it inside a fixed-width
@@ -28,10 +29,12 @@ function AppContent() {
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <AuthProvider>
-          <WebShell>
-            <StatusBar style="light" />
-            <RootNavigator />
-          </WebShell>
+          <LayoutModeProvider isWide={false}>
+            <WebShell>
+              <StatusBar style="light" />
+              <RootNavigator />
+            </WebShell>
+          </LayoutModeProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </QueryClientProvider>

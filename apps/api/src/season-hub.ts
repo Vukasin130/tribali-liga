@@ -461,7 +461,10 @@ function normalizeMatch(row: any) {
     awayTeamShortName: row.away_team_short_name || "",
     awayTeamLogoUrl: row.away_team_logo_url || "",
     homeScore: Number(row.home_score || 0),
-    awayScore: Number(row.away_score || 0)
+    awayScore: Number(row.away_score || 0),
+    period: row.period || "",
+    periodStartedAt: row.period_started_at || "",
+    halfLengthMinutes: Number(row.half_length_minutes || 20)
   };
 }
 

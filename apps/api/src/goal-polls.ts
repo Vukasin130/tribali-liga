@@ -1,6 +1,7 @@
 import { query } from "./db.ts";
 import { httpError } from "./errors.ts";
 import { requiredText } from "./validation.ts";
+import { sendAutomaticNotification } from "./push.ts";
 import type { Actor } from "./types.ts";
 
 const POLL_STATUSES = new Set(["draft", "open", "closed", "tiebreak"]);
@@ -63,21 +64,27 @@ export async function createGoalPoll(payload: CreateGoalPollPayload, actor: Acto
   const options = normalizeOptions(payload.options || []);
   if (options.length < 2) throw httpError(400, "Anketa mora imati najmanje dve opcije.");
 
+  const title = requiredText(payload.title || "Glasaj za gol kola", "Naslov ankete je obavezan.");
+  const status = validStatus(payload.status || "open");
   const result = await query(
     `insert into public.goal_polls (title, copy, status, ends_at, created_by_user_id)
      values ($1, $2, $3, $4, $5)
      returning id`,
-    [
-      requiredText(payload.title || "Glasaj za gol kola", "Naslov ankete je obavezan."),
-      String(payload.copy || "").trim(),
-      validStatus(payload.status || "open"),
-      payload.endsAt || payload.endAt || null,
-      actor.id
-    ]
+    [title, String(payload.copy || "").trim(), status, payload.endsAt || payload.endAt || null, actor.id]
   );
 
   await replaceOptions(result.rows[0].id, options);
   await audit(actor, "goalPoll.create", "goalPoll", result.rows[0].id, { title: payload.title });
+  // The composer always creates polls already "open" (no separate draft-then-publish
+  // step in the UI today), so this is the actual "I started the poll" moment - notify
+  // everyone right away rather than requiring a separate manual broadcast.
+  if (status === "open") {
+    sendAutomaticNotification(
+      "Nova anketa - glasaj za gol nedelje!",
+      `"${title}" je otvorena - izaberi najlepsi gol nedelje.`,
+      { kind: "goal_poll_open", pollId: result.rows[0].id }
+    );
+  }
   return getGoalPoll(result.rows[0].id, actor);
 }
 
@@ -114,6 +121,10 @@ export async function updateGoalPoll(id: string, payload: CreateGoalPollPayload,
 
 export async function setGoalPollStatus(id: string, payload: { status?: string; endsAt?: string; endAt?: string }, actor: Actor) {
   const status = validStatus(payload.status);
+  const current = await query("select status, title from public.goal_polls where id = $1", [id]);
+  if (!current.rows[0]) throw httpError(404, "Anketa nije pronadjena.");
+  const wasAlreadyOpen = current.rows[0].status === "open";
+
   const result = await query(
     `update public.goal_polls set status = $2, ends_at = coalesce($3, ends_at), updated_at = now()
      where id = $1
@@ -122,6 +133,15 @@ export async function setGoalPollStatus(id: string, payload: { status?: string; 
   );
   if (!result.rows[0]) throw httpError(404, "Anketa nije pronadjena.");
   await audit(actor, "goalPoll.status", "goalPoll", id, { status });
+  // Covers "Ponovo otvori" (reopening a tiebreak/closed poll) - same "just went live"
+  // moment as creating a poll already open, so it gets the same notification.
+  if (status === "open" && !wasAlreadyOpen) {
+    sendAutomaticNotification(
+      "Nova anketa - glasaj za gol nedelje!",
+      `"${current.rows[0].title}" je otvorena - izaberi najlepsi gol nedelje.`,
+      { kind: "goal_poll_open", pollId: id }
+    );
+  }
   return getGoalPoll(id, actor);
 }
 

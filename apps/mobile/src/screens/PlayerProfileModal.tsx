@@ -6,6 +6,8 @@ import { fetchPlayerProfile } from "../api/endpoints";
 import type { PlayerMatchStat, PlayerProfile } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill } from "../components/ui";
 import { colors, gradients } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { kitGradientForTeam } from "../components/PitchPlayerCard";
 import { useAuth } from "../state/AuthContext";
 import { PlayerEditorModal } from "./PlayerEditorModal";
@@ -36,6 +38,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   const [showEditor, setShowEditor] = useState(false);
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   function load() {
     setLoading(true);
@@ -80,7 +83,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
         ) : null}
 
         {profile ? (
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]} showsVerticalScrollIndicator={false}>
             <LinearGradient colors={gradients.hero} style={styles.hero}>
               <View style={styles.heroTopRow}>
                 <TouchableOpacity style={styles.iconButton} onPress={onClose}>
@@ -92,7 +95,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                     <Ionicons name="create-outline" size={18} color="#fff" />
                   </TouchableOpacity>
                 ) : (
-                  <View style={styles.iconButton} />
+                  <View style={styles.iconButtonSpacer} />
                 )}
               </View>
 
@@ -285,6 +288,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  iconButtonSpacer: { width: 36, height: 36 },
   heroBadgeText: { color: "rgba(255,255,255,0.85)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
   portraitPhoto: {
     width: 92,

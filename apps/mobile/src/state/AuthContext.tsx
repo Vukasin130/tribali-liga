@@ -9,7 +9,7 @@ interface AuthContextValue {
   status: "checking" | "signed-out" | "signed-in";
   error: string;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: { email: string; password: string; displayName: string; roleIntent?: string }) => Promise<void>;
+  register: (payload: { email: string; password: string; displayName: string; roleIntent?: string; teamId?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: (user: AuthUser) => void;
 }
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function register(payload: { email: string; password: string; displayName: string; roleIntent?: string }) {
+  async function register(payload: { email: string; password: string; displayName: string; roleIntent?: string; teamId?: string }) {
     setError("");
     try {
       await registerRequest(payload);

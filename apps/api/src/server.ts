@@ -14,21 +14,23 @@ import { config, storageMode } from "./config.ts";
 import {
   createGeneralSponsor,
   createNewsPost,
-  createSponsor,
   createStory,
   createStoryFolder,
+  deleteGeneralSponsor,
   deleteNewsPost,
   deleteStory,
   deleteStoryFolder,
+  getActiveDiscount,
   getActiveSponsor,
+  getDiscountForAdmin,
   getStoryStats,
   listActiveStories,
   listGeneralSponsors,
   listPublishedNews,
-  listSponsors,
   listStoryFolders,
   markStoryViewed,
   toggleStoryLike,
+  updateDiscount,
   updateGeneralSponsor,
   updateNewsPost,
   updateSponsor,
@@ -57,8 +59,6 @@ import {
   voteGoalPoll
 } from "./goal-polls.ts";
 import {
-  autoGenerateFantasyGameweeks,
-  createFantasyGameweek,
   createFantasySeason,
   getFantasySeason,
   getFantasySeasonLeaderboard,
@@ -67,14 +67,22 @@ import {
   listFantasyGameweeks,
   listFantasySeasonPlayerPool,
   listFantasySeasons,
-  scoreFantasySeasonGameweek,
+  runFantasyGameweekSweep,
   setFantasyPoolPlayerAvailability,
   setFantasyPoolPlayerPrice,
   setFantasySeasonPicks,
   syncFantasySeasonPool,
-  updateFantasyGameweek,
   updateFantasySeason
 } from "./fantasy-seasons.ts";
+import {
+  createFantasyMiniLeague,
+  disbandFantasyMiniLeague,
+  getFantasyMiniLeague,
+  getFantasyMiniLeagueLeaderboard,
+  joinFantasyMiniLeague,
+  leaveFantasyMiniLeague,
+  listMyFantasyMiniLeagues
+} from "./fantasy-mini-leagues.ts";
 import {
   addPlayerToTeam,
   createCity,
@@ -120,6 +128,7 @@ import {
   reviewVerificationRequest,
   updateOwnProfile
 } from "./verification.ts";
+import { getAnalyticsOverview } from "./analytics.ts";
 import { createUploadTarget } from "./uploads.ts";
 import { getLiveOverview, getRealtimeConfig } from "./realtime.ts";
 import { registerPushToken, sendAdminBroadcast } from "./push.ts";
@@ -134,6 +143,14 @@ setInterval(cleanupRateLimitBuckets, 60 * 1000).unref();
 setInterval(() => {
   runAvailabilityNotificationSweep().catch((error) => console.error("Availability sweep failed:", error));
 }, 30 * 60 * 1000).unref();
+// Fantasy rounds are pure calendar weeks with no admin action to create/open/lock/score
+// them - this sweep is the only thing that drives their lifecycle. Runs once at boot so
+// a freshly started server doesn't sit round-less for the first interval, then every 5
+// minutes (frequent enough to lock a round close to its actual first kickoff).
+runFantasyGameweekSweep().catch((error) => console.error("Fantasy gameweek sweep failed:", error));
+setInterval(() => {
+  runFantasyGameweekSweep().catch((error) => console.error("Fantasy gameweek sweep failed:", error));
+}, 5 * 60 * 1000).unref();
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -267,6 +284,12 @@ const server = http.createServer(async (req, res) => {
     if (adminVerificationMatch && req.method === "PATCH") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await reviewVerificationRequest(adminVerificationMatch[1], await readJson(req), sessionUser) });
+      return;
+    }
+
+    if (url.pathname === "/admin/analytics/overview" && req.method === "GET") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await getAnalyticsOverview() });
       return;
     }
 
@@ -643,14 +666,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname === "/sponsors" && req.method === "GET") {
-      sendJson(res, 200, { ok: true, data: await listSponsors() });
+    if (url.pathname === "/discount" && req.method === "GET") {
+      sendJson(res, 200, { ok: true, data: await getActiveDiscount() });
       return;
     }
 
-    if (url.pathname === "/admin/sponsors" && req.method === "POST") {
+    if (url.pathname === "/admin/discount" && req.method === "GET") {
       requireAdmin(sessionUser);
-      sendJson(res, 201, { ok: true, data: await createSponsor(await readJson(req), sessionUser) });
+      sendJson(res, 200, { ok: true, data: await getDiscountForAdmin() });
+      return;
+    }
+
+    if (url.pathname === "/admin/discount" && req.method === "PATCH") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await updateDiscount(await readJson(req), sessionUser) });
       return;
     }
 
@@ -675,6 +704,11 @@ const server = http.createServer(async (req, res) => {
     if (adminGeneralSponsorMatch && req.method === "PATCH") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await updateGeneralSponsor(adminGeneralSponsorMatch[1], await readJson(req), sessionUser) });
+      return;
+    }
+    if (adminGeneralSponsorMatch && req.method === "DELETE") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await deleteGeneralSponsor(adminGeneralSponsorMatch[1], sessionUser) });
       return;
     }
 
@@ -792,6 +826,46 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname === "/fantasy-mini-leagues" && req.method === "POST") {
+      sendJson(res, 201, { ok: true, data: await createFantasyMiniLeague(sessionUser, await readJson(req)) });
+      return;
+    }
+
+    if (url.pathname === "/fantasy-mini-leagues/join" && req.method === "POST") {
+      sendJson(res, 200, { ok: true, data: await joinFantasyMiniLeague(sessionUser, await readJson(req)) });
+      return;
+    }
+
+    if (url.pathname === "/fantasy-mini-leagues" && req.method === "GET") {
+      sendJson(res, 200, { ok: true, data: await listMyFantasyMiniLeagues(sessionUser, url.searchParams.get("fantasySeasonId") || "") });
+      return;
+    }
+
+    const miniLeagueLeaderboardMatch = url.pathname.match(/^\/fantasy-mini-leagues\/([^/]+)\/leaderboard$/);
+    if (miniLeagueLeaderboardMatch && req.method === "GET") {
+      sendJson(res, 200, {
+        ok: true,
+        data: await getFantasyMiniLeagueLeaderboard(sessionUser, miniLeagueLeaderboardMatch[1], url.searchParams.get("fantasyGameweekId") || undefined)
+      });
+      return;
+    }
+
+    const miniLeagueLeaveMatch = url.pathname.match(/^\/fantasy-mini-leagues\/([^/]+)\/leave$/);
+    if (miniLeagueLeaveMatch && req.method === "POST") {
+      sendJson(res, 200, { ok: true, data: await leaveFantasyMiniLeague(sessionUser, miniLeagueLeaveMatch[1]) });
+      return;
+    }
+
+    const miniLeagueMatch = url.pathname.match(/^\/fantasy-mini-leagues\/([^/]+)$/);
+    if (miniLeagueMatch && req.method === "GET") {
+      sendJson(res, 200, { ok: true, data: await getFantasyMiniLeague(sessionUser, miniLeagueMatch[1]) });
+      return;
+    }
+    if (miniLeagueMatch && req.method === "DELETE") {
+      sendJson(res, 200, { ok: true, data: await disbandFantasyMiniLeague(sessionUser, miniLeagueMatch[1]) });
+      return;
+    }
+
     const fantasySeasonMatch = url.pathname.match(/^\/fantasy-seasons\/([^/]+)$/);
     if (fantasySeasonMatch && req.method === "GET") {
       sendJson(res, 200, { ok: true, data: await getFantasySeason(fantasySeasonMatch[1]) });
@@ -849,35 +923,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname === "/admin/fantasy-gameweeks" && req.method === "POST") {
-      requireAdmin(sessionUser);
-      sendJson(res, 201, { ok: true, data: await createFantasyGameweek(await readJson(req), sessionUser) });
-      return;
-    }
-
-    const adminFantasyAutoGameweeksMatch = url.pathname.match(/^\/admin\/fantasy-seasons\/([^/]+)\/gameweeks\/autogenerate$/);
-    if (adminFantasyAutoGameweeksMatch && req.method === "POST") {
-      requireAdmin(sessionUser);
-      sendJson(res, 200, { ok: true, data: await autoGenerateFantasyGameweeks(adminFantasyAutoGameweeksMatch[1], sessionUser) });
-      return;
-    }
-
     if (url.pathname === "/fantasy-gameweeks" && req.method === "GET") {
       sendJson(res, 200, { ok: true, data: await listFantasyGameweeks(url.searchParams.get("fantasySeasonId") || "") });
-      return;
-    }
-
-    const adminFantasyGameweekMatch = url.pathname.match(/^\/admin\/fantasy-gameweeks\/([^/]+)$/);
-    if (adminFantasyGameweekMatch && req.method === "PATCH") {
-      requireAdmin(sessionUser);
-      sendJson(res, 200, { ok: true, data: await updateFantasyGameweek(adminFantasyGameweekMatch[1], await readJson(req), sessionUser) });
-      return;
-    }
-
-    const adminFantasyGameweekScoreMatch = url.pathname.match(/^\/admin\/fantasy-gameweeks\/([^/]+)\/score$/);
-    if (adminFantasyGameweekScoreMatch && req.method === "POST") {
-      requireAdmin(sessionUser);
-      sendJson(res, 200, { ok: true, data: await scoreFantasySeasonGameweek(adminFantasyGameweekScoreMatch[1], sessionUser) });
       return;
     }
 
@@ -972,10 +1019,10 @@ process.on("unhandledRejection", (reason) => {
 // browser CORS is concerned - always allow both for local admin dev regardless of
 // CORS_ORIGIN, so which hostname someone happens to type never silently breaks login.
 const ALWAYS_ALLOWED_ORIGINS = new Set([
-  "http://127.0.0.1:5173",
-  "http://localhost:5173",
   "http://127.0.0.1:8081",
-  "http://localhost:8081"
+  "http://localhost:8081",
+  "http://127.0.0.1:8082",
+  "http://localhost:8082"
 ]);
 const CONFIGURED_ORIGINS = new Set(
   String(config.api.corsOrigin || "")

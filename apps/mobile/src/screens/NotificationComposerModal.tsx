@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { sendAdminNotification } from "../api/endpoints";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function NotificationComposerModal({ onClose }: { onClose: () => void }) {
@@ -10,6 +12,7 @@ export function NotificationComposerModal({ onClose }: { onClose: () => void }) 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ recipients: number; sent: number } | null>(null);
+  const isWide = useIsWideScreen();
 
   async function handleSend() {
     if (!title.trim() || !body.trim()) {
@@ -34,7 +37,7 @@ export function NotificationComposerModal({ onClose }: { onClose: () => void }) 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Posalji notifikaciju</Text>
           <Text style={styles.subtitle}>Poruka ide svim korisnicima koji su dozvolili notifikacije na svom telefonu.</Text>
 

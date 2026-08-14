@@ -4,9 +4,12 @@ import { createGoalPoll } from "../api/endpoints";
 import type { GoalPollOptionInput } from "../api/endpoints";
 import { pickAndUploadMedia } from "../api/upload";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function GoalPollComposerModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const isWide = useIsWideScreen();
   const [title, setTitle] = useState("Glasaj za gol kola");
   const [options, setOptions] = useState<GoalPollOptionInput[]>([
     { title: "", videoUrl: "" },
@@ -57,7 +60,7 @@ export function GoalPollComposerModal({ onClose, onSaved }: { onClose: () => voi
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Nova anketa - gol nedelje</Text>
 
           <TextInput
@@ -98,6 +101,12 @@ export function GoalPollComposerModal({ onClose, onSaved }: { onClose: () => voi
             <Text style={styles.addOptionButtonText}>Dodaj opciju</Text>
           </TouchableOpacity>
 
+          <Text style={styles.videoHint}>
+            Preporuka za video: snimi ga horizontalno (vodoravno), u formatu 16:9, minimalno 1280x720. Na desktop
+            verziji sajta se video prikazuje preko cele sirine ekrana - vertikalni ("portret") snimci bivaju iseceni
+            sa strane da bi popunili taj prostor, dok horizontalni snimci staju ceo bez sečenja.
+          </Text>
+
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <PrimaryButton label={saving ? "Cuvanje..." : "Pokreni anketu"} onPress={handleSave} loading={saving} />
@@ -130,6 +139,7 @@ const styles = StyleSheet.create({
   removeOption: { color: colors.danger, fontWeight: "700", fontSize: 12, textAlign: "right" },
   addOptionButton: { alignItems: "center", paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: colors.line, borderStyle: "dashed" },
   addOptionButtonText: { color: colors.purple, fontWeight: "700" },
+  videoHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
   error: { color: colors.danger, fontWeight: "700", textAlign: "center" },
   cancelButton: { alignItems: "center", paddingVertical: 10 },
   cancelButtonText: { color: colors.textMuted, fontWeight: "700" }

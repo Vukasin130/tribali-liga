@@ -4,12 +4,12 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import {
   addMatchEvent,
+  createGeneralSponsor,
   createMatch,
-  createSponsor,
   fetchCompetitionTeams,
+  fetchGeneralSponsors,
   fetchMatchDetail,
   fetchSeasonHub,
-  fetchSponsors,
   fetchTeamPlayers,
   listCompetitions,
   listLiveMatches,
@@ -21,6 +21,8 @@ import {
 import { pickAndUploadMedia } from "../api/upload";
 import type { Competition, MatchDetail, MatchSummary, Player, Sponsor, Team } from "../api/types";
 import { colors, gradients } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { Card, EmptyState, Pill, PrimaryButton, SectionTitle } from "../components/ui";
 import { Pitch, PitchSlot } from "../components/Pitch";
 import { computeElapsedMinute, computeElapsedSeconds, formatClock, periodLabel } from "../utils/matchClock";
@@ -199,7 +201,7 @@ export function LiveMatchAdminModal({
   const matchMinute = Math.floor(matchSeconds / 60);
 
   useEffect(() => {
-    fetchSponsors().then(setSponsors).catch(() => undefined);
+    fetchGeneralSponsors().then(setSponsors).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -358,6 +360,21 @@ export function LiveMatchAdminModal({
     );
   }
 
+  // A team's roster in the DB is everyone who's ever played for them - not everyone
+  // shows up to every match. Excluding a player here just keeps them out of today's
+  // squad (inRoster: false, so they never land in the lineup sent to setMatchLineup
+  // and never appear as a bench option once the match goes live); it's reversible
+  // right up until kickoff via the "Nema danas" list below the bench.
+  function excludePlayer(playerId: string) {
+    setPlayers((previous) =>
+      previous.map((item) => (item.id === playerId ? { ...item, inRoster: false, isStarter: false } : item))
+    );
+  }
+
+  function includePlayer(playerId: string) {
+    setPlayers((previous) => previous.map((item) => (item.id === playerId ? { ...item, inRoster: true } : item)));
+  }
+
   async function startMatch() {
     if (!matchDetail || !canStart) return;
     setActionBusy(true);
@@ -414,11 +431,15 @@ export function LiveMatchAdminModal({
   }
 
   async function createAndAssignSponsor(payload: { title: string; logoUrl?: string; targetUrl?: string }) {
-    const created = await createSponsor(payload);
+    const created = await createGeneralSponsor(payload);
     setSponsors((previous) => [...previous, created]);
     await assignSponsor(created.id);
   }
 
+  // Tapping a field player both selects him (for goal/card actions) and arms him
+  // for substitution in one tap - the very next bench tap on his teammate swaps
+  // them immediately. No separate "confirm substitution" step: tap field player,
+  // tap bench player, done. Tapping a different field player just re-arms to him.
   function handlePlayerClick(player: RosterPlayer, mode: "playing" | "bench") {
     if (mode === "playing") {
       setSelectedPlayerId(player.id);
@@ -433,6 +454,10 @@ export function LiveMatchAdminModal({
       }
     }
     setSelectedPlayerId(player.id);
+  }
+
+  function cancelSubstitution() {
+    setSubstituteOutId(null);
   }
 
   async function makeSubstitution(outId: string, inId: string) {
@@ -606,6 +631,8 @@ export function LiveMatchAdminModal({
             onAddToStarters={addToStarters}
             onRemoveFromStarters={removeFromStarters}
             onToggleGoalkeeper={toggleBenchGoalkeeper}
+            onExcludePlayer={excludePlayer}
+            onIncludePlayer={includePlayer}
             canStart={canStart}
             onStart={startMatch}
             busy={actionBusy}
@@ -628,6 +655,7 @@ export function LiveMatchAdminModal({
             selectedPlayerId={selectedPlayerId}
             substituteOutId={substituteOutId}
             onPlayerClick={handlePlayerClick}
+            onCancelSubstitution={cancelSubstitution}
             onAction={applyAction}
             pendingGoal={pendingGoal}
             onConfirmGoal={confirmGoal}
@@ -674,10 +702,10 @@ function MatchHero({
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </TouchableOpacity>
         ) : (
-          <View style={styles.iconButton} />
+          <View style={styles.iconButtonSpacer} />
         )}
         <Text style={styles.heroEyebrow}>{eyebrow}</Text>
-        <View style={styles.iconButton} />
+        <View style={styles.iconButtonSpacer} />
       </View>
       <View style={styles.heroTeamsRow}>
         <View style={styles.heroTeam}>
@@ -746,6 +774,7 @@ function SetupPhase({
   onResume: (match: MatchSummary) => void;
   onClose: () => void;
 }) {
+  const isWide = useIsWideScreen();
   return (
     <View style={styles.screen}>
       <LinearGradient colors={gradients.hero} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.setupHero}>
@@ -754,13 +783,13 @@ function SetupPhase({
             <Ionicons name="chevron-back" size={20} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.heroEyebrow}>Admin</Text>
-          <View style={styles.iconButton} />
+          <View style={styles.iconButtonSpacer} />
         </View>
         <Text style={styles.setupHeroTitle}>Live utakmica</Text>
         <Text style={styles.setupHeroSubtitle}>Pokreni iz rasporeda, nastavi live mec, ili napravi vanrednu utakmicu.</Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
         {liveMatches.length > 0 ? (
           <View style={styles.field}>
             <Text style={styles.label}>Live utakmice u toku</Text>
@@ -882,6 +911,8 @@ function RosterPhase({
   onAddToStarters,
   onRemoveFromStarters,
   onToggleGoalkeeper,
+  onExcludePlayer,
+  onIncludePlayer,
   canStart,
   onStart,
   busy,
@@ -896,6 +927,8 @@ function RosterPhase({
   onAddToStarters: (playerId: string) => void;
   onRemoveFromStarters: (playerId: string) => void;
   onToggleGoalkeeper: (playerId: string) => void;
+  onExcludePlayer: (playerId: string) => void;
+  onIncludePlayer: (playerId: string) => void;
   canStart: boolean;
   onStart: () => void;
   busy: boolean;
@@ -905,6 +938,7 @@ function RosterPhase({
   onAssignSponsor: (sponsorId: string) => void;
   onCreateSponsor: (payload: { title: string; logoUrl?: string; targetUrl?: string }) => Promise<void>;
 }) {
+  const isWide = useIsWideScreen();
   const sides: { teamId: string; name: string }[] = [
     { teamId: matchDetail.homeTeamId, name: matchDetail.homeTeamName },
     { teamId: matchDetail.awayTeamId, name: matchDetail.awayTeamName }
@@ -920,11 +954,13 @@ function RosterPhase({
         awayTeamId={matchDetail.awayTeamId}
         onBack={onBack}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
         <Text style={styles.hintText}>Dodirni igraca na klupi da ga uvedes u postavu · dodirni igraca na terenu da ga vratis na klupu.</Text>
 
         {sides.map((side) => {
-          const teamPlayers = players.filter((player) => player.teamId === side.teamId);
+          const allTeamPlayers = players.filter((player) => player.teamId === side.teamId);
+          const teamPlayers = allTeamPlayers.filter((player) => player.inRoster);
+          const excludedPlayers = allTeamPlayers.filter((player) => !player.inRoster);
           const starters = teamPlayers.filter((player) => player.isStarter);
           const bench = teamPlayers.filter((player) => !player.isStarter);
           const keeperCount = starters.filter((player) => player.isGoalkeeper).length;
@@ -932,7 +968,7 @@ function RosterPhase({
           const teamValid = keeperCount === 1 && outfieldCount === 4;
           const pitchSlots = buildPitchSlots(side.teamId, starters);
 
-          if (teamPlayers.length === 0) {
+          if (allTeamPlayers.length === 0) {
             return (
               <Card key={side.teamId} style={styles.rosterCard}>
                 <SectionTitle title={side.name} />
@@ -959,26 +995,49 @@ function RosterPhase({
               <LinearGradient colors={["#C9A227", "#8A6D1F"]} style={styles.benchPanel}>
                 <Text style={styles.benchLabel}>Klupa ({bench.length})</Text>
                 {bench.length === 0 ? (
-                  <Text style={styles.benchEmptyText}>Svi igraci su u postavi.</Text>
+                  <Text style={styles.benchEmptyText}>
+                    {starters.length > 0 ? "Svi igraci su u postavi." : "Nema dostupnih igraca."}
+                  </Text>
                 ) : (
                   <View style={styles.benchGrid}>
                     {bench.map((player) => (
-                      <PitchPlayerCard
-                        key={player.id}
-                        name={player.displayName}
-                        teamId={player.teamId}
-                        avatarUrl={player.avatarUrl}
-                        isGoalkeeper={player.isGoalkeeper}
-                        weightBadge={player.isGoalkeeper ? "GK" : undefined}
-                        compact
-                        onPress={() => onAddToStarters(player.id)}
-                        onLongPress={() => onToggleGoalkeeper(player.id)}
-                      />
+                      <View key={player.id} style={styles.benchCardWrap}>
+                        <PitchPlayerCard
+                          name={player.displayName}
+                          teamId={player.teamId}
+                          avatarUrl={player.avatarUrl}
+                          isGoalkeeper={player.isGoalkeeper}
+                          weightBadge={player.isGoalkeeper ? "GK" : undefined}
+                          compact
+                          onPress={() => onAddToStarters(player.id)}
+                          onLongPress={() => onToggleGoalkeeper(player.id)}
+                        />
+                        <TouchableOpacity
+                          style={styles.benchRemoveBadge}
+                          onPress={() => onExcludePlayer(player.id)}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Ionicons name="close" size={12} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
                     ))}
                   </View>
                 )}
-                <Text style={styles.benchHint}>Drzi pritisnuto na klupi da oznacis/skines golmana.</Text>
+                <Text style={styles.benchHint}>Drzi pritisnuto na klupi da oznacis/skines golmana - X uklanja igraca koji danas nije prisutan.</Text>
               </LinearGradient>
+
+              {excludedPlayers.length > 0 ? (
+                <View style={styles.excludedWrap}>
+                  <Text style={styles.excludedLabel}>Nema danas ({excludedPlayers.length})</Text>
+                  <View style={styles.chipsRow}>
+                    {excludedPlayers.map((player) => (
+                      <TouchableOpacity key={player.id} style={styles.chip} onPress={() => onIncludePlayer(player.id)}>
+                        <Text style={styles.chipText}>+ {player.displayName}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
             </View>
           );
         })}
@@ -994,6 +1053,23 @@ function RosterPhase({
         <PrimaryButton label={busy ? "Pokretanje..." : "Start utakmice"} onPress={onStart} loading={busy} disabled={!canStart} />
       </ScrollView>
     </View>
+  );
+}
+
+function SponsorChip({ sponsor, active, onPress }: { sponsor: Sponsor; active: boolean; onPress: () => void }) {
+  const [photoFailed, setPhotoFailed] = useState(false);
+  return (
+    <TouchableOpacity style={[styles.chip, styles.sponsorChip, active ? styles.chipActive : null]} onPress={onPress}>
+      {sponsor.logoUrl && !photoFailed ? (
+        <Image
+          source={{ uri: sponsor.logoUrl }}
+          style={styles.sponsorChipLogo}
+          resizeMode="contain"
+          onError={() => setPhotoFailed(true)}
+        />
+      ) : null}
+      <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>{sponsor.title}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -1051,17 +1127,16 @@ function SponsorPicker({
     <View style={styles.field}>
       <Text style={styles.label}>Sponzor utakmice</Text>
       {sponsors.length === 0 ? (
-        <Text style={styles.hintText}>Jos nema sponzora u bazi.</Text>
+        <Text style={styles.hintText}>Jos nema aktivnih sponzora - dodaj ih ispod ili iz sekcije Sponzori.</Text>
       ) : (
         <View style={styles.chipsRow}>
           {sponsors.map((sponsor) => (
-            <TouchableOpacity
+            <SponsorChip
               key={sponsor.id}
-              style={[styles.chip, selectedSponsorId === sponsor.id ? styles.chipActive : null]}
+              sponsor={sponsor}
+              active={selectedSponsorId === sponsor.id}
               onPress={() => onAssign(sponsor.id)}
-            >
-              <Text style={[styles.chipText, selectedSponsorId === sponsor.id ? styles.chipTextActive : null]}>{sponsor.title}</Text>
-            </TouchableOpacity>
+            />
           ))}
         </View>
       )}
@@ -1081,7 +1156,7 @@ function SponsorPicker({
             autoCapitalize="none"
           />
           {logoUrl && !photoFailed ? (
-            <Image source={{ uri: logoUrl }} style={styles.sponsorLogoPreview} onError={() => setPhotoFailed(true)} />
+            <Image source={{ uri: logoUrl }} style={styles.sponsorLogoPreview} resizeMode="contain" onError={() => setPhotoFailed(true)} />
           ) : null}
           <TouchableOpacity style={styles.secondaryButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.secondaryButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni logo" : "Dodaj logo"}</Text>
@@ -1104,6 +1179,7 @@ function LivePhase({
   selectedPlayerId,
   substituteOutId,
   onPlayerClick,
+  onCancelSubstitution,
   onAction,
   pendingGoal,
   onConfirmGoal,
@@ -1121,6 +1197,7 @@ function LivePhase({
   selectedPlayerId: string;
   substituteOutId: string | null;
   onPlayerClick: (player: RosterPlayer, mode: "playing" | "bench") => void;
+  onCancelSubstitution: () => void;
   onAction: (type: ActionType) => void;
   pendingGoal: PendingGoal | null;
   onConfirmGoal: (assistantId: string | null) => void;
@@ -1129,6 +1206,7 @@ function LivePhase({
   busy: boolean;
   error: string;
 }) {
+  const isWide = useIsWideScreen();
   const sides: { teamId: string; name: string }[] = [
     { teamId: matchDetail.homeTeamId, name: matchDetail.homeTeamName },
     { teamId: matchDetail.awayTeamId, name: matchDetail.awayTeamName }
@@ -1152,7 +1230,7 @@ function LivePhase({
         awayTeamId={matchDetail.awayTeamId}
         status={matchDetail.status}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
         <View style={styles.clockRow}>
           <View style={styles.clockCenter}>
             <View style={styles.clockLiveRow}>
@@ -1243,6 +1321,16 @@ function LivePhase({
             <EmptyState message="Dodirni igraca na terenu da mu dodelis akciju." />
           )}
 
+          {substituteOutId ? (
+            <View style={styles.substitutionBanner}>
+              <Ionicons name="swap-horizontal" size={16} color={colors.ink} />
+              <Text style={styles.substitutionBannerText}>Zamena spremna - dodirni igraca na klupi da ga zameni</Text>
+              <TouchableOpacity onPress={onCancelSubstitution}>
+                <Text style={styles.substitutionBannerCancel}>Otkazi</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
           <View style={styles.actionsGrid}>
             {ACTION_CONFIG.map((action) => (
               <TouchableOpacity
@@ -1279,13 +1367,6 @@ function LivePhase({
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={() => selectedPlayer && onPlayerClick(selectedPlayer, "playing")}
-            disabled={busy || !selectedPlayer}
-          >
-            <Text style={styles.secondaryButtonText}>Zameni</Text>
-          </TouchableOpacity>
           <PrimaryButton label={busy ? "..." : "Kraj utakmice"} onPress={onFinish} loading={busy} variant="danger" />
         </Card>
 
@@ -1310,6 +1391,7 @@ function LivePhase({
 }
 
 function ReviewPhase({ matchDetail, onNewMatch, onClose }: { matchDetail: MatchDetail; onNewMatch: () => void; onClose: () => void }) {
+  const isWide = useIsWideScreen();
   const topPerformer = [...matchDetail.playerStats].sort((a, b) => b.fantasyPoints - a.fantasyPoints)[0];
   const events = [...matchDetail.events].sort((a, b) => b.minute - a.minute);
   return (
@@ -1325,7 +1407,7 @@ function ReviewPhase({ matchDetail, onNewMatch, onClose }: { matchDetail: MatchD
         status={matchDetail.status}
         onBack={onClose}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
         <Card style={styles.rosterCard}>
           <Text style={styles.hintText}>Najvise fantazi poena u mecu</Text>
           <Text style={styles.selectedPlayerName}>
@@ -1375,6 +1457,7 @@ const styles = StyleSheet.create({
   setupHeroSubtitle: { color: "rgba(255,255,255,0.8)", fontSize: 12, fontWeight: "600" },
   heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   iconButton: { width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" },
+  iconButtonSpacer: { width: 34, height: 34 },
   heroEyebrow: { color: "rgba(255,255,255,0.8)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
   heroTeamsRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
   heroTeam: { flex: 1, alignItems: "center", gap: 6 },
@@ -1387,6 +1470,19 @@ const styles = StyleSheet.create({
   field: { gap: 8 },
   label: { color: colors.textMuted, fontWeight: "700", fontSize: 12, textTransform: "uppercase" },
   hintText: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
+  substitutionBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.yellow,
+    paddingVertical: 8,
+    paddingHorizontal: 12
+  },
+  substitutionBannerText: { flex: 1, color: colors.ink, fontWeight: "700", fontSize: 12 },
+  substitutionBannerCancel: { color: colors.danger, fontWeight: "800", fontSize: 12 },
   errorText: { color: colors.danger, fontWeight: "700", textAlign: "center" },
   row: { flexDirection: "row", gap: 12 },
   flex1: { flex: 1 },
@@ -1395,6 +1491,8 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.purple, borderColor: colors.purple },
   chipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
   chipTextActive: { color: "#fff" },
+  sponsorChip: { flexDirection: "row", alignItems: "center", gap: 8 },
+  sponsorChipLogo: { width: 20, height: 20, borderRadius: 5, backgroundColor: "#fff" },
   input: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: 14,
@@ -1458,6 +1556,23 @@ const styles = StyleSheet.create({
   benchEmptyText: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600" },
   benchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   benchHint: { color: "rgba(255,255,255,0.75)", fontSize: 10, fontWeight: "600" },
+  benchCardWrap: { position: "relative" },
+  benchRemoveBadge: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.danger,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
+    zIndex: 6
+  },
+  excludedWrap: { gap: 8, marginTop: 4 },
+  excludedLabel: { color: colors.textMuted, fontWeight: "800", fontSize: 11, textTransform: "uppercase" },
   clockRow: {
     flexDirection: "row",
     alignItems: "center",

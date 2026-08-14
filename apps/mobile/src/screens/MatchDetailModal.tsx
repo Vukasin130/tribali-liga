@@ -1,26 +1,61 @@
 import React, { useState, useEffect } from "react";
-import { Image, Linking, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchCompetitionStandings, fetchLeaders, fetchMatchDetail, submitMatchPrediction, updateMatch } from "../api/endpoints";
-import type { LeaderEntry, MatchDetail, StandingGroup } from "../api/types";
+import { fetchCompetitionStandings, fetchLeaders, fetchMatchDetail, setMatchMedia, submitMatchPrediction, updateMatch } from "../api/endpoints";
+import type { LeaderEntry, MatchDetail, MatchLineupEntry, StandingGroup } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
 import { colors, gradients } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { TeamCrest } from "../components/TeamCrest";
+import { SponsorMarquee } from "../components/SponsorMarquee";
 import { StandingsTable } from "../components/StandingsTable";
+import { Pitch, type PitchSlot } from "../components/Pitch";
+import { PitchPlayerCard, kitGradientForTeam } from "../components/PitchPlayerCard";
 import { useAuth } from "../state/AuthContext";
 import { computeElapsedSeconds, formatClock, periodLabel } from "../utils/matchClock";
 import { TeamProfileModal } from "./TeamProfileModal";
 import { PlayerProfileModal } from "./PlayerProfileModal";
 
+function buildLineupPitchSlots(teamId: string, starters: MatchLineupEntry[], pointsByPlayer: Map<string, number> | null) {
+  const toSlot = (entry: MatchLineupEntry): PitchSlot => ({
+    slot: entry.id,
+    teamId,
+    name: entry.playerName,
+    avatarUrl: entry.avatarUrl,
+    statLabel: pointsByPlayer ? `${pointsByPlayer.get(entry.playerId) ?? 0} pts` : entry.shirtNumber ? `#${entry.shirtNumber}` : undefined
+  });
+  const keeper = starters.find((entry) => entry.isGoalkeeper);
+  const outfield = starters.filter((entry) => !entry.isGoalkeeper);
+  const defenders = outfield.filter((entry) => entry.position !== "napad");
+  const attackers = outfield.filter((entry) => entry.position === "napad");
+  return {
+    goalkeeper: keeper ? toSlot(keeper) : ({ slot: `${teamId}-gk-empty` } as PitchSlot),
+    defenders: defenders.map(toSlot),
+    attackers: attackers.map(toSlot)
+  };
+}
+
 type LeaderCategory = "goals" | "assists" | "saves" | "mvp";
+type TabelaSubTab = "table" | LeaderCategory;
 
 const LEADER_SECTIONS: { key: LeaderCategory; label: string; icon: keyof typeof Ionicons.glyphMap; unit: string }[] = [
   { key: "goals", label: "Najbolji strelac", icon: "football", unit: "gol." },
   { key: "assists", label: "Najbolji asistent", icon: "footsteps-outline", unit: "as." },
   { key: "saves", label: "Najbolji golman", icon: "hand-left-outline", unit: "odbr." },
   { key: "mvp", label: "MVP lige", icon: "trophy", unit: "poena" }
+];
+
+// Same 5-tab set and order as Explore's own Statistika section (Tabela/Golovi/Asist./Odbrane/MVP) -
+// one shared pattern for "league table + stat leaders" everywhere it appears.
+const TABELA_TABS: { key: TabelaSubTab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: "table", label: "Tabela", icon: "podium-outline" },
+  { key: "goals", label: "Golovi", icon: "football" },
+  { key: "assists", label: "Asist.", icon: "footsteps-outline" },
+  { key: "saves", label: "Odbrane", icon: "hand-left-outline" },
+  { key: "mvp", label: "MVP", icon: "trophy" }
 ];
 
 function pad(value: number): string {
@@ -92,13 +127,17 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
   const [round, setRound] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [savingMedia, setSavingMedia] = useState(false);
+  const [mediaMessage, setMediaMessage] = useState("");
   const [predicting, setPredicting] = useState(false);
   const [predictError, setPredictError] = useState("");
   const [tab, setTab] = useState<Tab>("detalji");
+  const [tabelaTab, setTabelaTab] = useState<TabelaSubTab>("table");
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
   const [formInitializedFor, setFormInitializedFor] = useState("");
-  const [sponsorPhotoFailed, setSponsorPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   const {
     data: detail,
@@ -123,7 +162,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
     setTime(formatTimeInput(detail.scheduledAt));
     setVenue(detail.venue || "");
     setRound(detail.round ? String(detail.round) : "");
-    setSponsorPhotoFailed(false);
+    setYoutubeUrl(detail.media.find((item) => item.kind === "youtube")?.url || "");
     setFormInitializedFor(matchId);
   }, [detail, matchId, formInitializedFor]);
 
@@ -181,6 +220,28 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
     }
   }
 
+  async function handleSaveMedia() {
+    if (!detail) return;
+    const url = youtubeUrl.trim();
+    if (!url) {
+      setMediaMessage("Unesi YouTube link.");
+      return;
+    }
+    setSavingMedia(true);
+    setMediaMessage("");
+    try {
+      const updated = await setMatchMedia(detail.id, { kind: "youtube", url, label: "Live prenos" });
+      queryClient.setQueryData<MatchDetail>(["matchDetail", matchId], (previous) =>
+        previous ? { ...previous, media: [...previous.media.filter((item) => item.kind !== "youtube"), updated] } : previous
+      );
+      setMediaMessage("Link je sacuvan.");
+    } catch (err) {
+      setMediaMessage(err instanceof Error ? err.message : "Link nije sacuvan.");
+    } finally {
+      setSavingMedia(false);
+    }
+  }
+
   async function handlePredict(pick: "home" | "draw" | "away") {
     if (!detail || predicting) return;
     if (!user) {
@@ -199,6 +260,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
     }
   }
 
+  const youtubeLink = detail?.media.find((item) => item.kind === "youtube")?.url || "";
   const homeLineup = detail?.lineups.filter((entry) => entry.teamId === detail.homeTeamId) ?? [];
   const awayLineup = detail?.lineups.filter((entry) => entry.teamId === detail.awayTeamId) ?? [];
   const events = detail ? [...detail.events].sort((a, b) => a.minute - b.minute) : [];
@@ -223,6 +285,9 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
   const playerStats = detail?.playerStats ?? [];
   const sumStat = (teamId: string, field: (typeof STAT_ROWS)[number]["field"]) =>
     playerStats.filter((stat) => stat.teamId === teamId).reduce((total, stat) => total + Number(stat[field] || 0), 0);
+  // Only while live does the pitch swap shirt numbers for a running points tally -
+  // mirrors the admin's own live-scoring pitch (LiveMatchAdminModal's LivePhase).
+  const pointsByPlayer = isLive ? new Map(playerStats.map((stat) => [stat.playerId, stat.fantasyPoints])) : null;
 
   const competitionId = detail?.competitionId;
   const tabelaQuery = useQuery({
@@ -246,7 +311,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
-      <View style={styles.screen}>
+      <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         {loading ? <LoadingState label="Ucitavanje utakmice..." /> : null}
         {error ? (
           <View style={styles.errorWrap}>
@@ -255,7 +320,11 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
         ) : null}
 
         {detail ? (
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={[styles.content, isWide ? wideContent : null]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             <LinearGradient colors={gradients.hero} style={styles.hero}>
               <View style={styles.heroTopRow}>
                 <TouchableOpacity style={styles.iconButton} onPress={onClose}>
@@ -264,7 +333,13 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                 <Text style={styles.heroBadgeText}>
                   {detail.gameweekName || (detail.round ? `Kolo ${detail.round}` : "Utakmica")}
                 </Text>
-                <View style={styles.iconButton} />
+                {youtubeLink ? (
+                  <TouchableOpacity style={styles.iconButton} onPress={() => Linking.openURL(youtubeLink).catch(() => undefined)}>
+                    <Ionicons name="logo-youtube" size={20} color="#fff" />
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.iconButtonSpacer} />
+                )}
               </View>
 
               <View style={styles.heroTeamsRow}>
@@ -293,28 +368,24 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                   <Text style={styles.heroTeamName} numberOfLines={2}>{detail.awayTeamName}</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.heroMeta}>
-                {formatDateTime(detail.scheduledAt)}
-                {detail.venue ? ` - ${detail.venue}` : ""}
-              </Text>
+
+              {(isPlayed || isLive) && (homeGoals.length > 0 || awayGoals.length > 0) ? (
+                <View style={styles.heroScorersRow}>
+                  <HeroScorersColumn goals={homeGoals} align="left" onPlayerPress={setActivePlayerId} />
+                  <Ionicons name="football" size={14} color={colors.primary} style={styles.heroScorersBall} />
+                  <HeroScorersColumn goals={awayGoals} align="right" onPlayerPress={setActivePlayerId} />
+                </View>
+              ) : null}
+
+              {!isLive ? (
+                <Text style={styles.heroMeta}>
+                  {formatDateTime(detail.scheduledAt)}
+                  {detail.venue ? ` - ${detail.venue}` : ""}
+                </Text>
+              ) : null}
             </LinearGradient>
 
-            {detail.sponsor?.logoUrl && !sponsorPhotoFailed ? (
-              <TouchableOpacity
-                style={styles.sponsorWindow}
-                activeOpacity={detail.sponsor.targetUrl ? 0.8 : 1}
-                onPress={() => {
-                  if (detail.sponsor?.targetUrl) Linking.openURL(detail.sponsor.targetUrl).catch(() => undefined);
-                }}
-              >
-                <Image
-                  source={{ uri: detail.sponsor.logoUrl }}
-                  style={styles.sponsorWindowLogo}
-                  resizeMode="cover"
-                  onError={() => setSponsorPhotoFailed(true)}
-                />
-              </TouchableOpacity>
-            ) : null}
+            <SponsorMarquee />
 
             <View style={styles.body}>
               <View style={styles.tabRow}>
@@ -329,25 +400,13 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
 
               {tab === "detalji" ? (
                 <>
-                  <View style={styles.infoGrid}>
-                    <InfoBox label="Datum" value={formatDateTime(detail.scheduledAt)} />
-                    <InfoBox label="Faza" value={detail.gameweekName || detail.phaseName || `Kolo ${detail.round || "-"}`} />
-                    <InfoBox label="Status" value={statusLabel(detail.status)} />
-                    {detail.venue ? <InfoBox label="Teren" value={detail.venue} /> : null}
-                  </View>
-
-                  {isPlayed || isLive ? (
-                    <Card style={styles.goalsCard}>
-                      <Text style={styles.sectionLabel}>Strelci</Text>
-                      <View style={styles.goalsRow}>
-                        <Text style={styles.goalsTeam} numberOfLines={1}>{detail.homeTeamName}</Text>
-                        <ScorersList goals={homeGoals} onPlayerPress={setActivePlayerId} />
-                      </View>
-                      <View style={styles.goalsRow}>
-                        <Text style={styles.goalsTeam} numberOfLines={1}>{detail.awayTeamName}</Text>
-                        <ScorersList goals={awayGoals} onPlayerPress={setActivePlayerId} />
-                      </View>
-                    </Card>
+                  {!isLive ? (
+                    <View style={styles.infoGrid}>
+                      <InfoBox label="Datum" value={formatDateTime(detail.scheduledAt)} />
+                      <InfoBox label="Faza" value={detail.gameweekName || detail.phaseName || `Kolo ${detail.round || "-"}`} />
+                      <InfoBox label="Status" value={statusLabel(detail.status)} />
+                      {detail.venue ? <InfoBox label="Teren" value={detail.venue} /> : null}
+                    </View>
                   ) : null}
 
                   <View>
@@ -355,28 +414,12 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                     {events.length === 0 ? (
                       <EmptyState message={isPlayed ? "Dogadjaji jos nisu uneti u zapisnik." : "Dogadjaji ce se prikazati kada utakmica pocne."} />
                     ) : (
-                      events.map((event) => {
-                        const Wrapper = event.playerId ? TouchableOpacity : View;
-                        const wrapperProps = event.playerId ? { onPress: () => setActivePlayerId(event.playerId as string) } : {};
-                        return event.type === "goal" ? (
-                          <Wrapper key={event.id} style={styles.goalMomentRow} {...wrapperProps}>
-                            <View style={styles.goalMomentIcon}>
-                              <Ionicons name="football" size={18} color="#fff" />
-                            </View>
-                            <View style={styles.flex1}>
-                              <Text style={styles.goalMomentText}>{event.text || describeEvent(event)}</Text>
-                              <Text style={styles.goalMomentScore}>{event.scoreHome} : {event.scoreAway}</Text>
-                            </View>
-                            <Text style={styles.timelineMinute}>{event.minute}'</Text>
-                          </Wrapper>
-                        ) : (
-                          <Wrapper key={event.id} style={styles.timelineRow} {...wrapperProps}>
-                            <Text style={styles.timelineMinute}>{event.minute}'</Text>
-                            <Ionicons name={EVENT_ICONS[event.type] ?? "ellipse-outline"} size={14} color={colors.textMuted} />
-                            <Text style={styles.timelineText}>{event.text || describeEvent(event)}</Text>
-                          </Wrapper>
-                        );
-                      })
+                      <View style={styles.timelineWrap}>
+                        <View style={styles.timelineSpine} />
+                        {events.map((event) => (
+                          <TimelineEvent key={event.id} event={event} homeTeamId={detail.homeTeamId} onPlayerPress={setActivePlayerId} />
+                        ))}
+                      </View>
                     )}
                   </View>
 
@@ -442,7 +485,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                     </Card>
                   ) : null}
 
-                  {isAdmin ? (
+                  {isAdmin && !isLive ? (
                     <Card style={{ gap: 10 }}>
                       <Text style={styles.sectionLabel}>Admin - termin utakmice</Text>
                       <View style={styles.adminRow}>
@@ -464,20 +507,40 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                       <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj termin"} onPress={handleSaveMatch} loading={saving} />
                     </Card>
                   ) : null}
+
+                  {isAdmin ? (
+                    <Card style={{ gap: 10 }}>
+                      <Text style={styles.sectionLabel}>Admin - prenos uzivo (YouTube)</Text>
+                      <TextInput
+                        style={styles.adminInput}
+                        placeholder="https://youtube.com/..."
+                        placeholderTextColor="#9c9186"
+                        autoCapitalize="none"
+                        value={youtubeUrl}
+                        onChangeText={setYoutubeUrl}
+                      />
+                      {mediaMessage ? <Text style={styles.adminMessage}>{mediaMessage}</Text> : null}
+                      <PrimaryButton label={savingMedia ? "Cuvanje..." : "Sacuvaj link"} onPress={handleSaveMedia} loading={savingMedia} />
+                    </Card>
+                  ) : null}
                 </>
               ) : null}
 
               {tab === "sastavi" ? (
-                <View style={styles.lineupsRow}>
-                  <LineupColumn
-                    title={detail.homeTeamShortName || detail.homeTeamName}
+                <View style={{ gap: 20 }}>
+                  <LineupPitchBlock
+                    teamId={detail.homeTeamId}
+                    name={detail.homeTeamShortName || detail.homeTeamName}
                     lineup={homeLineup}
+                    pointsByPlayer={pointsByPlayer}
                     onTeamPress={() => setActiveTeamId(detail.homeTeamId)}
                     onPlayerPress={setActivePlayerId}
                   />
-                  <LineupColumn
-                    title={detail.awayTeamShortName || detail.awayTeamName}
+                  <LineupPitchBlock
+                    teamId={detail.awayTeamId}
+                    name={detail.awayTeamShortName || detail.awayTeamName}
                     lineup={awayLineup}
+                    pointsByPlayer={pointsByPlayer}
                     onTeamPress={() => setActiveTeamId(detail.awayTeamId)}
                     onPlayerPress={setActivePlayerId}
                   />
@@ -486,41 +549,57 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
 
               {tab === "tabela" ? (
                 <View style={{ gap: 16 }}>
-                  {tabelaLoading ? <LoadingState label="Ucitavanje tabele..." /> : null}
-                  {!tabelaLoading && standings.length === 0 ? <EmptyState message="Tabela jos nije dostupna." /> : null}
-                  {standings.map((group) => (
-                    <StandingsTable key={group.name} groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
-                  ))}
+                  <View style={styles.leaderTabsRow}>
+                    {TABELA_TABS.map((section) => (
+                      <TouchableOpacity
+                        key={section.key}
+                        style={[styles.leaderTab, tabelaTab === section.key ? styles.leaderTabActive : null]}
+                        onPress={() => setTabelaTab(section.key)}
+                      >
+                        <Ionicons name={section.icon} size={13} color={tabelaTab === section.key ? "#fff" : colors.textMuted} />
+                        <Text style={[styles.leaderTabText, tabelaTab === section.key ? styles.leaderTabTextActive : null]}>
+                          {section.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-                  {!tabelaLoading
-                    ? LEADER_SECTIONS.map((section) => {
-                        const entries = (leaders[section.key] ?? []).slice(0, 3);
-                        if (entries.length === 0) return null;
+                  {tabelaLoading ? <LoadingState label="Ucitavanje tabele..." /> : null}
+
+                  {!tabelaLoading && tabelaTab === "table" ? (
+                    standings.length === 0 ? (
+                      <EmptyState message="Tabela jos nije dostupna." />
+                    ) : (
+                      standings.map((group) => (
+                        <StandingsTable key={group.name} groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
+                      ))
+                    )
+                  ) : null}
+
+                  {!tabelaLoading && tabelaTab !== "table"
+                    ? (() => {
+                        const section = LEADER_SECTIONS.find((item) => item.key === tabelaTab)!;
+                        const entries = leaders[tabelaTab] ?? [];
+                        if (entries.length === 0) return <EmptyState message="Nema podataka za ovu kategoriju." />;
                         return (
-                          <View key={section.key}>
-                            <View style={styles.sectionHeader}>
-                              <Ionicons name={section.icon} size={15} color={colors.purple} />
-                              <Text style={styles.sectionLabel}>{section.label}</Text>
-                            </View>
-                            <Card style={styles.leadersCard}>
-                              {entries.map((entry, index) => (
-                                <TouchableOpacity
-                                  key={entry.playerId}
-                                  style={[styles.leaderRow, index > 0 ? styles.leaderRowDivider : null]}
-                                  onPress={() => setActivePlayerId(entry.playerId)}
-                                >
-                                  <Text style={styles.leaderRank}>{entry.rank}</Text>
-                                  <View style={{ flex: 1 }}>
-                                    <Text style={styles.leaderName} numberOfLines={1}>{entry.playerName}</Text>
-                                    <Text style={styles.leaderTeam} numberOfLines={1}>{entry.teamShortName || entry.teamName}</Text>
-                                  </View>
-                                  <Text style={styles.leaderValue}>{entry.value} {section.unit}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </Card>
-                          </View>
+                          <Card style={styles.leadersCard}>
+                            {entries.map((entry, index) => (
+                              <TouchableOpacity
+                                key={entry.playerId}
+                                style={[styles.leaderRow, index > 0 ? styles.leaderRowDivider : null]}
+                                onPress={() => setActivePlayerId(entry.playerId)}
+                              >
+                                <Text style={styles.leaderRank}>{entry.rank}</Text>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={styles.leaderName} numberOfLines={1}>{entry.playerName}</Text>
+                                  <Text style={styles.leaderTeam} numberOfLines={1}>{entry.teamShortName || entry.teamName}</Text>
+                                </View>
+                                <Text style={styles.leaderValue}>{entry.value} {section.unit}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </Card>
                         );
-                      })
+                      })()
                     : null}
                 </View>
               ) : null}
@@ -530,7 +609,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
 
         {activeTeamId ? <TeamProfileModal teamId={activeTeamId} onClose={() => setActiveTeamId(null)} /> : null}
         {activePlayerId ? <PlayerProfileModal playerId={activePlayerId} onClose={() => setActivePlayerId(null)} /> : null}
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -544,22 +623,49 @@ function InfoBox({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ScorersList({ goals, onPlayerPress }: { goals: MatchDetail["events"]; onPlayerPress: (playerId: string) => void }) {
-  if (goals.length === 0) return <Text style={styles.goalsText}>Strelci nisu uneti</Text>;
+// One line per scorer, e.g. "Damjan Varnicic 1', 63'" - groups a team's goal events by
+// player so a brace doesn't repeat their name once per goal.
+function groupGoalsByScorer(goals: MatchDetail["events"]): { key: string; playerId: string | null; label: string }[] {
+  const order: string[] = [];
+  const byScorer = new Map<string, { playerId: string | null; name: string; minutes: number[] }>();
+  for (const event of goals) {
+    const key = event.playerId || event.playerName || event.id;
+    if (!byScorer.has(key)) {
+      order.push(key);
+      byScorer.set(key, { playerId: event.playerId || null, name: event.playerName || "Gol", minutes: [] });
+    }
+    byScorer.get(key)!.minutes.push(event.minute);
+  }
+  return order.map((key) => {
+    const entry = byScorer.get(key)!;
+    return { key, playerId: entry.playerId, label: `${entry.name} ${entry.minutes.map((m) => `${m}'`).join(", ")}` };
+  });
+}
+
+function HeroScorersColumn({
+  goals,
+  align,
+  onPlayerPress
+}: {
+  goals: MatchDetail["events"];
+  align: "left" | "right";
+  onPlayerPress: (playerId: string) => void;
+}) {
+  const scorers = groupGoalsByScorer(goals);
+  if (scorers.length === 0) return <View style={styles.heroScorersCol} />;
   return (
-    <View style={styles.scorersWrap}>
-      {goals.map((event, index) => (
-        <React.Fragment key={event.id}>
-          {index > 0 ? <Text style={styles.goalsText}>, </Text> : null}
-          {event.playerId ? (
-            <TouchableOpacity onPress={() => onPlayerPress(event.playerId as string)}>
-              <Text style={styles.scorerLink}>{event.playerName || "Gol"} {event.minute}'</Text>
-            </TouchableOpacity>
-          ) : (
-            <Text style={styles.goalsText}>{event.playerName || event.teamName || "Gol"} {event.minute}'</Text>
-          )}
-        </React.Fragment>
-      ))}
+    <View style={[styles.heroScorersCol, align === "right" ? styles.heroScorersColRight : null]}>
+      {scorers.map((scorer) =>
+        scorer.playerId ? (
+          <TouchableOpacity key={scorer.key} onPress={() => onPlayerPress(scorer.playerId as string)}>
+            <Text style={[styles.heroScorerText, align === "right" ? styles.heroScorerTextRight : null]}>{scorer.label}</Text>
+          </TouchableOpacity>
+        ) : (
+          <Text key={scorer.key} style={[styles.heroScorerText, align === "right" ? styles.heroScorerTextRight : null]}>
+            {scorer.label}
+          </Text>
+        )
+      )}
     </View>
   );
 }
@@ -599,6 +705,125 @@ const EVENT_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   fulltime: "flag-outline"
 };
 
+type TimelineContent = {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconBg: string;
+  iconColor: string;
+  primary: string;
+  secondary: string | null;
+  badge: string | null;
+};
+
+function buildTimelineContent(event: MatchDetail["events"][number]): TimelineContent {
+  if (event.type === "goal") {
+    return {
+      icon: "football",
+      iconBg: colors.purple,
+      iconColor: "#fff",
+      primary: event.playerName || "Gol",
+      secondary: event.relatedPlayerName ? `Asistencija: ${event.relatedPlayerName}` : null,
+      badge: `${event.scoreHome}:${event.scoreAway}`
+    };
+  }
+  if (event.type === "substitution") {
+    return {
+      icon: "swap-horizontal",
+      iconBg: colors.ink,
+      iconColor: "#fff",
+      primary: event.playerName ? `${event.playerName} ulazi` : "Izmena",
+      secondary: event.relatedPlayerName ? `${event.relatedPlayerName} izlazi` : null,
+      badge: null
+    };
+  }
+  if (event.type === "yellow_card" || event.type === "red_card") {
+    return {
+      icon: "square",
+      iconBg: event.type === "yellow_card" ? colors.warning : colors.danger,
+      iconColor: "#fff",
+      primary: event.playerName || describeEvent(event),
+      secondary: null,
+      badge: null
+    };
+  }
+  return {
+    icon: EVENT_ICONS[event.type] ?? "ellipse-outline",
+    iconBg: colors.surfaceMuted,
+    iconColor: colors.textMuted,
+    primary: event.text || describeEvent(event),
+    secondary: null,
+    badge: null
+  };
+}
+
+// System events (kickoff/halftime/fulltime) carry no team_id - they're logged as
+// match-wide markers, not something either side "did", so they render as a single
+// centered pill instead of joining the left/right team split below.
+function TimelineEvent({
+  event,
+  homeTeamId,
+  onPlayerPress
+}: {
+  event: MatchDetail["events"][number];
+  homeTeamId: string;
+  onPlayerPress: (playerId: string) => void;
+}) {
+  if (!event.teamId) {
+    return (
+      <View style={styles.timelineSystemRow}>
+        <View style={styles.timelineSystemPill}>
+          <Ionicons name={EVENT_ICONS[event.type] ?? "ellipse-outline"} size={12} color={colors.textMuted} />
+          <Text style={styles.timelineSystemText}>{event.text || describeEvent(event)}</Text>
+          <Text style={styles.timelineSystemMinute}>{event.minute}'</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const side: "left" | "right" = event.teamId === homeTeamId ? "left" : "right";
+  const content = buildTimelineContent(event);
+  const Wrapper = event.playerId ? TouchableOpacity : View;
+  const wrapperProps = event.playerId ? { onPress: () => onPlayerPress(event.playerId as string) } : {};
+
+  const minuteNode = (
+    <Text key="minute" style={styles.timelineMinuteText}>
+      {event.minute}'
+    </Text>
+  );
+  const iconNode = (
+    <View key="icon" style={[styles.timelineIconDot, { backgroundColor: content.iconBg }]}>
+      <Ionicons name={content.icon} size={13} color={content.iconColor} />
+    </View>
+  );
+  const badgeNode = content.badge ? (
+    <View key="badge" style={styles.timelineBadge}>
+      <Text style={styles.timelineBadgeText}>{content.badge}</Text>
+    </View>
+  ) : null;
+  const textNode = (
+    <View key="text" style={styles.timelineTextGroup}>
+      <Text style={[styles.timelineMainText, side === "right" ? styles.timelineTextRight : null]} numberOfLines={2}>
+        {content.primary}
+      </Text>
+      {content.secondary ? (
+        <Text style={[styles.timelineSubText, side === "right" ? styles.timelineTextRight : null]} numberOfLines={1}>
+          {content.secondary}
+        </Text>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <Wrapper style={styles.timelineRow} {...wrapperProps}>
+      <View style={styles.timelineHalf}>
+        {side === "left" ? [minuteNode, iconNode, badgeNode, textNode] : null}
+      </View>
+      <View style={[styles.timelineHalf, styles.timelineHalfRight]}>
+        {side === "right" ? [textNode, badgeNode, iconNode, minuteNode] : null}
+      </View>
+    </Wrapper>
+  );
+}
+
 function PredictOption({
   label,
   sub,
@@ -632,44 +857,77 @@ function PredictOption({
   );
 }
 
-function LineupColumn({
-  title,
+function LineupPitchBlock({
+  teamId,
+  name,
   lineup,
+  pointsByPlayer,
   onTeamPress,
   onPlayerPress
 }: {
-  title: string;
-  lineup: MatchDetail["lineups"];
+  teamId: string;
+  name: string;
+  lineup: MatchLineupEntry[];
+  pointsByPlayer: Map<string, number> | null;
   onTeamPress: () => void;
   onPlayerPress: (playerId: string) => void;
 }) {
   const starters = lineup.filter((entry) => entry.isStarter);
   const bench = lineup.filter((entry) => !entry.isStarter);
-  return (
-    <Card style={styles.lineupColumn}>
-      <TouchableOpacity onPress={onTeamPress}>
-        <Text style={styles.lineupTitle}>{title}</Text>
-      </TouchableOpacity>
-      {starters.length === 0 ? <EmptyState message="Sastav nije unet." /> : null}
-      {starters.map((entry) => (
-        <TouchableOpacity key={entry.id} style={styles.lineupPlayerRow} onPress={() => onPlayerPress(entry.playerId)}>
-          {entry.shirtNumber ? <Text style={styles.lineupShirt}>{entry.shirtNumber}</Text> : null}
-          <Text style={styles.lineupPlayer} numberOfLines={1}>{entry.playerName}</Text>
-          {entry.isGoalkeeper ? <Pill label="GK" tone="neutral" /> : null}
+  const pitchSlots = buildLineupPitchSlots(teamId, starters, pointsByPlayer);
+
+  if (lineup.length === 0) {
+    return (
+      <View>
+        <TouchableOpacity onPress={onTeamPress}>
+          <Text style={styles.lineupTitle}>{name}</Text>
         </TouchableOpacity>
-      ))}
-      {bench.length > 0 ? (
-        <>
-          <Text style={styles.lineupBenchLabel}>Klupa</Text>
-          {bench.map((entry) => (
-            <TouchableOpacity key={entry.id} style={styles.lineupPlayerRow} onPress={() => onPlayerPress(entry.playerId)}>
-              {entry.shirtNumber ? <Text style={styles.lineupShirt}>{entry.shirtNumber}</Text> : null}
-              <Text style={styles.lineupPlayerBench} numberOfLines={1}>{entry.playerName}</Text>
-            </TouchableOpacity>
-          ))}
-        </>
-      ) : null}
-    </Card>
+        <EmptyState message="Sastav nije unet." />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.lineupBlock}>
+      <View style={styles.lineupBlockHeader}>
+        <LinearGradient colors={kitGradientForTeam(teamId)} style={styles.lineupTeamDot} />
+        <TouchableOpacity onPress={onTeamPress}>
+          <Text style={styles.lineupTitle}>{name}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Pitch
+        goalkeeper={pitchSlots.goalkeeper}
+        defenders={pitchSlots.defenders}
+        attackers={pitchSlots.attackers}
+        onSelectSlot={(slot) => {
+          const entry = starters.find((item) => item.id === slot);
+          if (entry) onPlayerPress(entry.playerId);
+        }}
+      />
+
+      <LinearGradient colors={["#C9A227", "#8A6D1F"]} style={styles.lineupBenchPanel}>
+        <Text style={styles.lineupBenchLabel}>Klupa ({bench.length})</Text>
+        {bench.length === 0 ? (
+          <Text style={styles.lineupBenchEmptyText}>Nema igraca na klupi.</Text>
+        ) : (
+          <View style={styles.lineupBenchGrid}>
+            {bench.map((entry) => (
+              <PitchPlayerCard
+                key={entry.id}
+                name={entry.playerName}
+                teamId={teamId}
+                avatarUrl={entry.avatarUrl}
+                isGoalkeeper={entry.isGoalkeeper}
+                statLabel={pointsByPlayer ? `${pointsByPlayer.get(entry.playerId) ?? 0} pts` : entry.shirtNumber ? `#${entry.shirtNumber}` : undefined}
+                compact
+                onPress={() => onPlayerPress(entry.playerId)}
+              />
+            ))}
+          </View>
+        )}
+      </LinearGradient>
+    </View>
   );
 }
 
@@ -694,6 +952,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  // A same-size, invisible placeholder purely to keep the badge text centered in
+  // heroTopRow - unlike iconButton it must never look like a tappable circle with
+  // nothing behind it.
+  iconButtonSpacer: { width: 36, height: 36 },
   heroBadgeText: { color: "rgba(255,255,255,0.85)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
   heroTeamsRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
   heroTeam: { flex: 1, alignItems: "center", gap: 6 },
@@ -706,45 +968,6 @@ const styles = StyleSheet.create({
   livePulse: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.live },
   liveClockLabel: { color: "rgba(255,255,255,0.75)", fontWeight: "700", fontSize: 10, textTransform: "uppercase" },
   liveClockText: { color: "#fff", fontWeight: "900", fontSize: 20, fontVariant: ["tabular-nums"] },
-  sponsorWindow: {
-    marginHorizontal: 20,
-    marginTop: -14,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 8,
-    shadowColor: "#141414",
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3
-  },
-  sponsorWindowLogo: { width: "100%", height: "100%" },
-  goalMomentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(201,162,39,0.1)",
-    borderWidth: 1,
-    borderColor: "rgba(201,162,39,0.3)",
-    borderRadius: 14,
-    padding: 10,
-    marginBottom: 8
-  },
-  goalMomentIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.purple,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  goalMomentText: { color: colors.ink, fontWeight: "800", fontSize: 13 },
-  goalMomentScore: { color: colors.textMuted, fontWeight: "700", fontSize: 11, marginTop: 1 },
   body: { padding: 20, paddingTop: 16, gap: 16 },
   tabRow: { flexDirection: "row", backgroundColor: colors.surfaceMuted, borderRadius: 14, padding: 4, gap: 4 },
   tabButton: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: "center" },
@@ -764,35 +987,63 @@ const styles = StyleSheet.create({
   infoLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", textTransform: "uppercase", marginBottom: 4 },
   infoValue: { color: colors.textPrimary, fontSize: 12, fontWeight: "700" },
   sectionLabel: { color: colors.ink, fontWeight: "900", fontSize: 15, marginBottom: 10 },
-  goalsCard: { gap: 8 },
-  goalsRow: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
-  goalsTeam: { color: colors.ink, fontWeight: "800", fontSize: 12, flexShrink: 0, maxWidth: "35%" },
-  goalsText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", textAlign: "right" },
-  scorersWrap: { flex: 1, flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" },
-  scorerLink: { color: colors.purple, fontSize: 12, fontWeight: "700", textDecorationLine: "underline" },
+  heroScorersRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginTop: 4 },
+  heroScorersBall: { marginTop: 2 },
+  heroScorersCol: { flex: 1, gap: 2 },
+  heroScorersColRight: { alignItems: "flex-end" },
+  heroScorerText: { color: "rgba(255,255,255,0.9)", fontWeight: "700", fontSize: 12, textAlign: "left" },
+  heroScorerTextRight: { textAlign: "right" },
   flowCopy: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
-  timelineRow: {
-    flexDirection: "row",
-    gap: 10,
+  timelineWrap: { position: "relative" },
+  timelineSpine: {
+    position: "absolute",
+    left: "50%",
+    top: 4,
+    bottom: 4,
+    width: 1,
+    marginLeft: -0.5,
+    backgroundColor: colors.cardBorder
+  },
+  timelineRow: { flexDirection: "row", alignItems: "flex-start", minHeight: 30, marginBottom: 12 },
+  timelineHalf: { flex: 1, flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "flex-start", paddingRight: 10 },
+  timelineHalfRight: { justifyContent: "flex-end", paddingRight: 0, paddingLeft: 10 },
+  timelineMinuteText: { color: colors.textMuted, fontWeight: "800", fontSize: 10, width: 24 },
+  timelineIconDot: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2
+  },
+  timelineBadge: {
     backgroundColor: colors.surfaceMuted,
-    borderRadius: 14,
-    padding: 10,
-    marginBottom: 8
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: colors.cardBorder
   },
-  timelineMinute: {
-    color: "#fff",
-    backgroundColor: colors.purple,
-    fontWeight: "800",
-    fontSize: 11,
-    width: 36,
-    height: 28,
-    borderRadius: 10,
-    textAlign: "center",
-    textAlignVertical: "center",
-    overflow: "hidden"
+  timelineBadgeText: { color: colors.ink, fontWeight: "800", fontSize: 10 },
+  timelineTextGroup: { flexShrink: 1 },
+  timelineMainText: { color: colors.textPrimary, fontSize: 12, fontWeight: "800" },
+  timelineSubText: { color: colors.textMuted, fontSize: 11, fontWeight: "600", marginTop: 1 },
+  timelineTextRight: { textAlign: "right" },
+  timelineSystemRow: { alignItems: "center", marginVertical: 4 },
+  timelineSystemPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    zIndex: 2
   },
-  timelineText: { flex: 1, color: colors.textPrimary, fontSize: 12, fontWeight: "600" },
+  timelineSystemText: { color: colors.textMuted, fontWeight: "700", fontSize: 11 },
+  timelineSystemMinute: { color: colors.textMuted, fontWeight: "800", fontSize: 11 },
   statRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   statNumber: { width: 24, color: colors.ink, fontWeight: "800", fontSize: 12, textAlign: "center" },
   statMiddle: { flex: 1, gap: 4 },
@@ -821,15 +1072,30 @@ const styles = StyleSheet.create({
   predictTrackFillActive: { backgroundColor: colors.purple },
   predictPercent: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
   predictPercentActive: { color: colors.purple },
-  lineupsRow: { flexDirection: "row", gap: 12 },
-  lineupColumn: { flex: 1, gap: 6 },
-  lineupTitle: { color: colors.purple, fontWeight: "800", fontSize: 12, marginBottom: 4, textTransform: "uppercase" },
-  lineupPlayerRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 },
-  lineupShirt: { width: 18, color: colors.textMuted, fontWeight: "800", fontSize: 11 },
-  lineupPlayer: { flex: 1, color: colors.textPrimary, fontSize: 13, fontWeight: "700" },
-  lineupPlayerBench: { flex: 1, color: colors.textMuted, fontSize: 12, fontWeight: "600" },
-  lineupBenchLabel: { color: colors.textMuted, fontWeight: "800", fontSize: 10, textTransform: "uppercase", marginTop: 8, marginBottom: 2 },
+  lineupTitle: { color: colors.ink, fontWeight: "800", fontSize: 15 },
+  lineupBlock: { gap: 10 },
+  lineupBlockHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  lineupTeamDot: { width: 14, height: 14, borderRadius: 4 },
+  lineupBenchPanel: { borderRadius: 16, padding: 10, gap: 8 },
+  lineupBenchLabel: { color: "rgba(255,255,255,0.9)", fontWeight: "800", fontSize: 12, textTransform: "uppercase" },
+  lineupBenchEmptyText: { color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600" },
+  lineupBenchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sectionHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
+  leaderTabsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  leaderTab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  leaderTabActive: { backgroundColor: colors.ink, borderColor: colors.ink },
+  leaderTabText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
+  leaderTabTextActive: { color: "#fff" },
   leadersCard: { gap: 0 },
   leaderRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
   leaderRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },

@@ -177,6 +177,7 @@ export interface MatchLineupEntry {
   playerId: string;
   playerName: string;
   position: string;
+  avatarUrl: string;
   isStarter: boolean;
   isGoalkeeper: boolean;
   shirtNumber: number | null;
@@ -215,6 +216,14 @@ export interface MatchPlayerStat {
   fantasyPoints: number;
 }
 
+export interface MediaLink {
+  id: string;
+  matchId: string;
+  kind: string;
+  label: string;
+  url: string;
+}
+
 export interface MatchPredictions {
   home: number;
   draw: number;
@@ -230,6 +239,7 @@ export interface MatchDetail extends MatchSummary {
   lineups: MatchLineupEntry[];
   events: MatchEventDetail[];
   playerStats: MatchPlayerStat[];
+  media: MediaLink[];
   predictions: MatchPredictions;
 }
 
@@ -292,6 +302,16 @@ export interface LeaderboardEntry {
   points: number;
   totalPoints: number;
   lastScoredAt: string | null;
+}
+
+export interface FantasyMiniLeague {
+  id: string;
+  fantasySeasonId: string;
+  name: string;
+  inviteCode: string;
+  memberCount: number;
+  isCreator: boolean;
+  createdAt: string;
 }
 
 export interface Gameweek {
@@ -402,6 +422,7 @@ export interface FantasySeasonTeam {
   name: string;
   totalPoints: number;
   lastScoredAt: string | null;
+  budgetCap: number;
   budgetSpent: number;
   budgetRemaining: number;
   picks: FantasySeasonPick[];
@@ -534,6 +555,10 @@ export interface LeadersResponse {
 export interface VerificationRequest {
   id: string;
   createdAt: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string;
   cityId: string;
   cityName: string;
   teamId: string;
@@ -630,4 +655,67 @@ export interface Sponsor {
   logoUrl: string;
   targetUrl: string;
   isActive?: boolean;
+}
+
+export interface AnalyticsDailyCount {
+  day: string;
+  count: number;
+}
+
+export interface AnalyticsEngagementMetric {
+  total: number;
+  last7Days: number;
+}
+
+export interface AnalyticsOverview {
+  users: {
+    total: number;
+    fans: number;
+    verifiedPlayers: number;
+    admins: number;
+    newLast7Days: number;
+    newLast30Days: number;
+  };
+  registrationsPerDay: AnalyticsDailyCount[];
+  activityPerDay: AnalyticsDailyCount[];
+  fantasy: {
+    totalTeams: number;
+    newLast30Days: number;
+  };
+  engagement: {
+    storyViews: AnalyticsEngagementMetric;
+    storyLikes: AnalyticsEngagementMetric;
+    goalVotes: AnalyticsEngagementMetric;
+    matchPredictions: AnalyticsEngagementMetric;
+  };
+  content: {
+    newsTotal: number;
+    newsPublished: number;
+    storiesTotal: number;
+    goalPollsTotal: number;
+  };
+  verification: {
+    none: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+  adminActivity: {
+    last7Days: number;
+    last30Days: number;
+  };
+  miniLeagues: {
+    total: number;
+    newLast30Days: number;
+    totalMemberships: number;
+    list: Array<{
+      id: string;
+      name: string;
+      inviteCode: string;
+      createdAt: string;
+      seasonName: string;
+      creatorName: string;
+      memberCount: number;
+    }>;
+  };
 }

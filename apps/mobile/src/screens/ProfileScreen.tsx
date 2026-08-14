@@ -5,6 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   deleteAccount,
   fetchCompetitionTeams,
+  fetchDiscount,
+  fetchDiscountForAdmin,
   fetchMyAvailabilityRequests,
   fetchMyVerificationRequests,
   fetchProfile,
@@ -14,17 +16,21 @@ import {
   updateProfile
 } from "../api/endpoints";
 import { ApiError } from "../api/client";
-import type { MatchAvailabilityRequest, Player, Profile, Team, VerificationRequest } from "../api/types";
+import type { MatchAvailabilityRequest, Player, Profile, Sponsor, Team, VerificationRequest } from "../api/types";
 import { Card, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
 import { colors } from "../theme/colors";
 import { useAuth } from "../state/AuthContext";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { useCompetition } from "../state/CompetitionContext";
+import { DiscountEditorModal } from "./DiscountEditorModal";
 import { LegalScreen } from "./LegalScreen";
 import { NotificationComposerModal } from "./NotificationComposerModal";
+import { SponsorsManagerModal } from "./SponsorsManagerModal";
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
   const { competitionId } = useCompetition();
+  const isWide = useIsWideScreen();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -33,6 +39,9 @@ export function ProfileScreen() {
   const [saved, setSaved] = useState(false);
   const [legalScreen, setLegalScreen] = useState<"privacy" | "terms" | null>(null);
   const [showNotificationComposer, setShowNotificationComposer] = useState(false);
+  const [showSponsorsManager, setShowSponsorsManager] = useState(false);
+  const [discount, setDiscount] = useState<Sponsor | null>(null);
+  const [showDiscountEditor, setShowDiscountEditor] = useState(false);
 
   const [requests, setRequests] = useState<VerificationRequest[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -67,6 +76,15 @@ export function ProfileScreen() {
       .then(setAvailabilityRequests)
       .catch(() => undefined);
   }, []);
+
+  // Admin sees the record even while it's turned off (so they can re-enable it without
+  // retyping everything); everyone else only sees it once it's actually active.
+  function loadDiscount() {
+    const loader = profile?.role === "admin" ? fetchDiscountForAdmin : fetchDiscount;
+    loader().then(setDiscount).catch(() => undefined);
+  }
+
+  useEffect(loadDiscount, [profile?.role]);
 
   async function handleRespondAvailability(matchId: string, status: "playing" | "not_playing") {
     setRespondingMatchId(matchId);
@@ -169,7 +187,7 @@ export function ProfileScreen() {
   const name = profile?.displayName ?? user?.displayName ?? "";
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, isWide ? styles.contentWide : null]}>
       <View style={styles.header}>
         <Text style={styles.headerKicker}>Profil</Text>
         <Text style={styles.headerTitle}>Nalog</Text>
@@ -213,10 +231,11 @@ export function ProfileScreen() {
 
       {isAdmin ? (
         <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Verifikacija igraca</Text>
+          <Text style={styles.cardTitle}>Sponzori</Text>
           <Text style={styles.helperText}>
-            Kao administrator, ne igras fantasy i ne treba ti oznaka verifikovanog igraca - ti odobravas ili odbijas tudje zahteve za verifikaciju iz admin panela ("Verifikacija igraca").
+            Upravljaj sponzorima koji se prikazuju kao traka logoa kroz aplikaciju.
           </Text>
+          <PrimaryButton label="Otvori sponzore" onPress={() => setShowSponsorsManager(true)} />
         </Card>
       ) : null}
 
@@ -267,7 +286,7 @@ export function ProfileScreen() {
                       onPress={() => setTeamId(team.id)}
                     >
                       <Text style={[styles.teamChipText, teamId === team.id ? styles.teamChipTextActive : null]} numberOfLines={1}>
-                        {team.shortName || team.name}
+                        {team.name || team.shortName}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -356,15 +375,31 @@ export function ProfileScreen() {
         </Card>
       ) : null}
 
-      <Card style={styles.card}>
-        <View style={styles.sponsorRow}>
-          <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>10% popusta kod partnera lige</Text>
-            <Text style={styles.helperText}>Profil moze da nosi QR kupon ili kod za popust.</Text>
+      {isAdmin ? (
+        <Card style={styles.card}>
+          <View style={styles.sponsorRow}>
+            <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>{discount?.title || "Popust kod partnera"}</Text>
+              <Text style={styles.helperText}>
+                {discount?.subtitle || "Jos nije podeseno - dodaj naslov, kod i po zelji QR sliku."}
+              </Text>
+            </View>
+            <Pill label={discount?.isActive === false ? "Neaktivan" : discount ? "Aktivan" : "Prazan"} tone={discount?.isActive === false ? "neutral" : discount ? "success" : "neutral"} />
           </View>
-        </View>
-      </Card>
+          <PrimaryButton label={discount ? "Uredi popust" : "Podesi popust"} variant="ghost" onPress={() => setShowDiscountEditor(true)} />
+        </Card>
+      ) : discount ? (
+        <Card style={styles.card}>
+          <View style={styles.sponsorRow}>
+            <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>{discount.title}</Text>
+              {discount.subtitle ? <Text style={styles.helperText}>{discount.subtitle}</Text> : null}
+            </View>
+          </View>
+        </Card>
+      ) : null}
 
       <PrimaryButton label="Odjava" onPress={logout} variant="danger" />
 
@@ -407,6 +442,19 @@ export function ProfileScreen() {
 
       {legalScreen ? <LegalScreen kind={legalScreen} onClose={() => setLegalScreen(null)} /> : null}
       {showNotificationComposer ? <NotificationComposerModal onClose={() => setShowNotificationComposer(false)} /> : null}
+      {showSponsorsManager ? (
+        <SponsorsManagerModal onClose={() => setShowSponsorsManager(false)} onChanged={() => undefined} />
+      ) : null}
+      {showDiscountEditor ? (
+        <DiscountEditorModal
+          discount={discount}
+          onClose={() => setShowDiscountEditor(false)}
+          onSaved={() => {
+            setShowDiscountEditor(false);
+            loadDiscount();
+          }}
+        />
+      ) : null}
     </ScrollView>
   );
 }
@@ -453,6 +501,7 @@ function verificationLabel(status?: string, pendingRequest?: VerificationRequest
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 18, paddingTop: 58, gap: 14, paddingBottom: 40 },
+  contentWide: { maxWidth: 640, alignSelf: "center", width: "100%", paddingTop: 48, gap: 18 },
   header: {},
   headerKicker: { color: colors.purple, fontWeight: "700", fontSize: 12, textTransform: "uppercase" },
   headerTitle: { color: colors.ink, fontSize: 26, fontWeight: "700" },

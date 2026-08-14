@@ -124,6 +124,9 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { flexGrow: 1, padding: 20, justifyContent: "center" },
   card: {
+    width: "100%",
+    maxWidth: 420,
+    alignSelf: "center",
     backgroundColor: "#fff",
     borderRadius: 28,
     padding: 24,

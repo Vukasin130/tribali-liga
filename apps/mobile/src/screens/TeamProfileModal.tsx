@@ -6,6 +6,8 @@ import { fetchTeamProfile, removePlayerFromTeam } from "../api/endpoints";
 import type { MatchSummary, TeamProfile } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill } from "../components/ui";
 import { colors, gradients } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { kitGradientForTeam } from "../components/PitchPlayerCard";
 import { useAuth } from "../state/AuthContext";
 import { PlayerProfileModal } from "./PlayerProfileModal";
@@ -77,6 +79,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
   const [showEditTeam, setShowEditTeam] = useState(false);
   const [siblingTeamId, setSiblingTeamId] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   function load() {
     setLoading(true);
@@ -118,7 +121,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
         ) : null}
 
         {profile ? (
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]} showsVerticalScrollIndicator={false}>
             <LinearGradient colors={gradients.hero} style={styles.hero}>
               <View style={styles.heroTopRow}>
                 <TouchableOpacity style={styles.iconButton} onPress={onClose}>
@@ -130,7 +133,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                     <Ionicons name="pencil-outline" size={16} color="#fff" />
                   </TouchableOpacity>
                 ) : (
-                  <View style={styles.iconButton} />
+                  <View style={styles.iconButtonSpacer} />
                 )}
               </View>
 
@@ -421,6 +424,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  iconButtonSpacer: { width: 36, height: 36 },
   heroBadgeText: { color: "rgba(255,255,255,0.85)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
   crestPhoto: {
     width: 84,

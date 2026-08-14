@@ -3,6 +3,8 @@ import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, TextInput, Touc
 import { addClubToCompetition, createTeam, fetchClubs } from "../api/endpoints";
 import type { Club, Team } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 export function TeamComposerModal({
@@ -25,6 +27,7 @@ export function TeamComposerModal({
   const [groupName, setGroupName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +95,7 @@ export function TeamComposerModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Dodaj ekipu</Text>
 
           <Text style={styles.label}>Postojeci klubovi iz baze</Text>
