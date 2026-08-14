@@ -43,9 +43,12 @@ export function SponsorRail({ sponsors, onChanged }: { sponsors: Sponsor[]; onCh
 function SponsorTile({ sponsor, isAdmin, onPress }: { sponsor: Sponsor; isAdmin: boolean; onPress: () => void }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
+  // Match the tile background to whichever backdrop this logo was designed against,
+  // instead of always forcing white behind logos that already have a dark background.
+  const dark = sponsor.logoBackground === "dark";
   return (
     <TouchableOpacity
-      style={styles.tile}
+      style={[styles.tile, dark ? styles.tileDark : null]}
       activeOpacity={0.7}
       onPress={() => {
         if (isAdmin) {
@@ -80,6 +83,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 1
   },
+  tileDark: { backgroundColor: colors.ink, borderColor: colors.ink },
   addTile: { backgroundColor: colors.surfaceMuted, borderStyle: "dashed" },
   logo: { width: "100%", height: "100%" }
 });

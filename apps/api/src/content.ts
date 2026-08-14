@@ -255,6 +255,7 @@ export async function updateSponsor(payload: any, actor: Actor) {
     item.subtitle = String(payload.subtitle || "").trim();
     item.logoUrl = String(payload.logoUrl || "").trim();
     item.isActive = payload.isActive !== false;
+    item.logoBackground = payload.logoBackground === "dark" ? "dark" : "light";
     item.updatedAt = timestamp();
     audit(db, actor, "sponsor.update", "sponsor", item.id, { title: item.title });
     return item;
@@ -285,6 +286,7 @@ export async function updateDiscount(payload: any, actor: Actor) {
     item.logoUrl = String(payload.logoUrl || "").trim();
     item.targetUrl = String(payload.targetUrl || "").trim();
     item.isActive = payload.isActive !== false;
+    item.logoBackground = payload.logoBackground === "dark" ? "dark" : "light";
     item.updatedAt = timestamp();
     audit(db, actor, "discount.update", "sponsor", item.id, { title: item.title });
     return item;
@@ -308,7 +310,8 @@ export async function createGeneralSponsor(payload: any, actor: Actor) {
       logoUrl: String(payload.logoUrl || "").trim(),
       targetUrl: String(payload.targetUrl || "").trim(),
       isActive: true,
-      kind: "general"
+      kind: "general",
+      logoBackground: payload.logoBackground === "dark" ? "dark" : "light"
     };
     (db.sponsors as any[]).push(item);
     audit(db, actor, "sponsor.create", "sponsor", item.id, { title: item.title });
@@ -325,6 +328,7 @@ export async function updateGeneralSponsor(id: string, payload: any, actor: Acto
     item.logoUrl = String(payload.logoUrl || "").trim();
     item.targetUrl = String(payload.targetUrl || "").trim();
     item.isActive = payload.isActive !== false;
+    item.logoBackground = payload.logoBackground === "dark" ? "dark" : "light";
     item.updatedAt = timestamp();
     audit(db, actor, "sponsor.update", "sponsor", item.id, { title: item.title });
     return item;

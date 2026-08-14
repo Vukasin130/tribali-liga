@@ -8,6 +8,7 @@ import { colors } from "../theme/colors";
 import { wideContent } from "../theme/layout";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
+import { LogoBackgroundToggle } from "../components/LogoBackgroundToggle";
 
 // Edits the Profile screen's "partner discount" card - reuses the sponsors table
 // (kind='discount') so this is just one more single-record editor next to the
@@ -25,6 +26,7 @@ export function DiscountEditorModal({
   const [subtitle, setSubtitle] = useState(discount?.subtitle ?? "");
   const [targetUrl, setTargetUrl] = useState(discount?.targetUrl ?? "");
   const [logoUrl, setLogoUrl] = useState(discount?.logoUrl ?? "");
+  const [logoBackground, setLogoBackground] = useState<"light" | "dark">(discount?.logoBackground === "dark" ? "dark" : "light");
   const [isActive, setIsActive] = useState(discount?.isActive !== false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -62,7 +64,8 @@ export function DiscountEditorModal({
         subtitle: subtitle.trim(),
         logoUrl,
         targetUrl: targetUrl.trim(),
-        isActive
+        isActive,
+        logoBackground
       });
       onSaved();
     } catch (err) {
@@ -92,11 +95,17 @@ export function DiscountEditorModal({
           <TextInput style={styles.input} placeholder="Link ka partneru (opciono)" placeholderTextColor="#9c9186" value={targetUrl} onChangeText={setTargetUrl} autoCapitalize="none" />
 
           {logoUrl && !photoFailed ? (
-            <Image source={{ uri: logoUrl }} style={styles.logoPreview} resizeMode="contain" onError={() => setPhotoFailed(true)} />
+            <Image
+              source={{ uri: logoUrl }}
+              style={[styles.logoPreview, logoBackground === "dark" ? styles.logoPreviewDark : null]}
+              resizeMode="contain"
+              onError={() => setPhotoFailed(true)}
+            />
           ) : null}
           <TouchableOpacity style={styles.pickButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.pickButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni QR/sliku" : "Dodaj QR/sliku (opciono)"}</Text>
           </TouchableOpacity>
+          {logoUrl ? <LogoBackgroundToggle value={logoBackground} onChange={setLogoBackground} /> : null}
 
           <TouchableOpacity style={styles.activeToggle} onPress={() => setIsActive((current) => !current)}>
             <Ionicons name={isActive ? "checkbox" : "square-outline"} size={20} color={isActive ? colors.purple : colors.textMuted} />
@@ -130,6 +139,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line
   },
   logoPreview: { width: 96, height: 96, borderRadius: 16, alignSelf: "center", backgroundColor: "#fff" },
+  logoPreviewDark: { backgroundColor: colors.ink },
   pickButton: { backgroundColor: colors.surfaceMuted, borderRadius: 14, paddingVertical: 12, alignItems: "center", borderWidth: 1, borderColor: colors.line },
   pickButtonText: { color: colors.purple, fontWeight: "700" },
   activeToggle: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 },

@@ -61,9 +61,14 @@ export function SponsorMarquee() {
 function SponsorLogo({ sponsor }: { sponsor: Sponsor }) {
   const [failed, setFailed] = useState(false);
   if (!sponsor.logoUrl || failed) return null;
+  // Each logo gets its own card instead of one shared bar behind all of them - the
+  // strip can be scrolling several sponsors at once, and a single shared background
+  // can't be right for both a white-background logo and a black-background one at
+  // the same time.
+  const dark = sponsor.logoBackground === "dark";
   return (
     <TouchableOpacity
-      style={styles.logoWrap}
+      style={[styles.logoWrap, dark ? styles.logoWrapDark : null]}
       activeOpacity={sponsor.targetUrl ? 0.7 : 1}
       onPress={() => {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
@@ -79,19 +84,27 @@ const styles = StyleSheet.create({
     height: LOGO_HEIGHT,
     marginHorizontal: 20,
     marginTop: -14,
-    borderRadius: 16,
+    overflow: "hidden"
+  },
+  track: { flexDirection: "row" },
+  set: { flexDirection: "row", alignItems: "center", paddingHorizontal: GAP / 2 },
+  logoWrap: {
+    width: LOGO_WIDTH,
+    height: LOGO_HEIGHT,
+    marginHorizontal: GAP / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    overflow: "hidden",
+    paddingHorizontal: 8,
     shadowColor: "#141414",
     shadowOpacity: 0.1,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3
   },
-  track: { flexDirection: "row" },
-  set: { flexDirection: "row", alignItems: "center", paddingHorizontal: GAP / 2 },
-  logoWrap: { width: LOGO_WIDTH, height: LOGO_HEIGHT, marginHorizontal: GAP / 2, alignItems: "center", justifyContent: "center" },
+  logoWrapDark: { backgroundColor: colors.ink, borderColor: colors.ink },
   logo: { width: "100%", height: "100%" }
 });

@@ -56,9 +56,13 @@ export function SponsorStrip() {
 function SponsorTile({ sponsor }: { sponsor: Sponsor }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
+  // Logos arrive with their own baked-in background - a hardcoded white tile behind a
+  // dark-background logo just draws a mismatched box, so the tile matches whichever
+  // background the admin picked for this logo when they uploaded it.
+  const dark = sponsor.logoBackground === "dark";
   return (
     <TouchableOpacity
-      style={styles.tile}
+      style={[styles.tile, dark ? styles.tileDark : null]}
       activeOpacity={sponsor.targetUrl ? 0.7 : 1}
       onPress={() => {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
@@ -84,6 +88,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 8
   },
+  tileDark: { backgroundColor: colors.ink, borderColor: colors.ink },
   addTile: { backgroundColor: colors.surfaceMuted, borderStyle: "dashed" },
   logo: { width: "100%", height: "100%" }
 });

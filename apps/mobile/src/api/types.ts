@@ -655,6 +655,9 @@ export interface Sponsor {
   logoUrl: string;
   targetUrl: string;
   isActive?: boolean;
+  // Which tile background the logo was designed against - "light" for a transparent
+  // or white-background logo, "dark" for one with a black/dark background baked in.
+  logoBackground?: "light" | "dark";
 }
 
 export interface AnalyticsDailyCount {

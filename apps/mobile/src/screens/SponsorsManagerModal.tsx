@@ -5,6 +5,7 @@ import { createGeneralSponsor, deleteGeneralSponsor, fetchAllGeneralSponsors, up
 import { pickAndUploadMedia } from "../api/upload";
 import type { Sponsor } from "../api/types";
 import { colors } from "../theme/colors";
+import { LogoBackgroundToggle } from "../components/LogoBackgroundToggle";
 import { wideContent } from "../theme/layout";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
@@ -108,6 +109,7 @@ function SponsorForm({
   const [subtitle, setSubtitle] = useState(sponsor?.subtitle ?? "");
   const [targetUrl, setTargetUrl] = useState(sponsor?.targetUrl ?? "");
   const [logoUrl, setLogoUrl] = useState(sponsor?.logoUrl ?? "");
+  const [logoBackground, setLogoBackground] = useState<"light" | "dark">(sponsor?.logoBackground === "dark" ? "dark" : "light");
   const [isActive, setIsActive] = useState(sponsor?.isActive !== false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -145,7 +147,7 @@ function SponsorForm({
     setSaving(true);
     setError("");
     try {
-      const payload = { title: title.trim(), subtitle: subtitle.trim(), logoUrl, targetUrl: targetUrl.trim(), isActive };
+      const payload = { title: title.trim(), subtitle: subtitle.trim(), logoUrl, targetUrl: targetUrl.trim(), isActive, logoBackground };
       if (isEditing && sponsor) {
         await updateGeneralSponsor(sponsor.id, payload);
       } else {
@@ -181,7 +183,7 @@ function SponsorForm({
           {logoUrl && !photoFailed ? (
             <Image
               source={{ uri: logoUrl }}
-              style={styles.logoPreview}
+              style={[styles.logoPreview, logoBackground === "dark" ? styles.logoPreviewDark : null]}
               resizeMode="contain"
               onError={() => setPhotoFailed(true)}
             />
@@ -191,6 +193,7 @@ function SponsorForm({
           <TouchableOpacity style={styles.pickButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.pickButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni logo" : "Dodaj logo"}</Text>
           </TouchableOpacity>
+          {logoUrl ? <LogoBackgroundToggle value={logoBackground} onChange={setLogoBackground} /> : null}
 
           <TextInput style={styles.input} placeholder="Naziv sponzora (interno, ne prikazuje se)" placeholderTextColor="#9c9186" value={title} onChangeText={setTitle} />
           <TextInput style={styles.input} placeholder="Beleska (opciono)" placeholderTextColor="#9c9186" value={subtitle} onChangeText={setSubtitle} />
@@ -259,6 +262,7 @@ const styles = StyleSheet.create({
   logo: { width: 40, height: 40, borderRadius: 10 },
   logoPlaceholder: { backgroundColor: colors.surfaceMuted, borderRadius: 10 },
   logoPreview: { width: 96, height: 96, borderRadius: 16, alignSelf: "center", backgroundColor: "#fff" },
+  logoPreviewDark: { backgroundColor: colors.ink },
   rowTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
   rowSubtitle: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   pickButton: { backgroundColor: colors.surfaceMuted, borderRadius: 14, paddingVertical: 12, alignItems: "center", borderWidth: 1, borderColor: colors.line },

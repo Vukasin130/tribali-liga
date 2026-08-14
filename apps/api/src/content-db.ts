@@ -274,7 +274,7 @@ export async function getStoryStatsDb(storyId: string) {
 
 export async function getActiveSponsorDb() {
   const result = await query(
-    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
+    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background
      from public.sponsors
      where is_active = true and kind = 'weekly'
      order by updated_at desc
@@ -290,6 +290,14 @@ interface SponsorPayload {
   logoUrl?: string;
   targetUrl?: string;
   isActive?: boolean;
+  logoBackground?: string;
+}
+
+// Sponsor logos arrive with their own baked-in background - clamp to the two tile
+// treatments the rendering side actually knows how to draw, so a stray/garbage value
+// can never leave a logo tile styled with an arbitrary, unhandled backgroundColor.
+function normalizeLogoBackground(value: unknown): "light" | "dark" {
+  return value === "dark" ? "dark" : "light";
 }
 
 export async function updateSponsorDb(payload: SponsorPayload, actor: Actor) {
@@ -301,28 +309,30 @@ export async function updateSponsorDb(payload: SponsorPayload, actor: Actor) {
 
   const result = id
     ? await query(
-        `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, updated_at = now()
+        `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, logo_background = $7, updated_at = now()
          where id = $1 and kind = 'weekly'
-         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background`,
         [
           id,
           requiredText(payload.title, "Naslov sponzora je obavezan."),
           String(payload.subtitle || "").trim(),
           String(payload.logoUrl || "").trim(),
           String(payload.targetUrl || "").trim(),
-          payload.isActive !== false
+          payload.isActive !== false,
+          normalizeLogoBackground(payload.logoBackground)
         ]
       )
     : await query(
-        `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind)
-         values ($1, $2, $3, $4, $5, 'weekly')
-         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+        `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind, logo_background)
+         values ($1, $2, $3, $4, $5, 'weekly', $6)
+         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background`,
         [
           requiredText(payload.title, "Naslov sponzora je obavezan."),
           String(payload.subtitle || "").trim(),
           String(payload.logoUrl || "").trim(),
           String(payload.targetUrl || "").trim(),
-          payload.isActive !== false
+          payload.isActive !== false,
+          normalizeLogoBackground(payload.logoBackground)
         ]
       );
 
@@ -338,7 +348,7 @@ export async function updateSponsorDb(payload: SponsorPayload, actor: Actor) {
 // so the card only ever shows once an admin has actually set something up.
 export async function getActiveDiscountDb() {
   const result = await query(
-    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
+    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background
      from public.sponsors
      where is_active = true and kind = 'discount'
      order by updated_at desc
@@ -351,7 +361,7 @@ export async function getActiveDiscountDb() {
 // otherwise there'd be no way to re-enable it without re-typing everything from scratch.
 export async function getDiscountForAdminDb() {
   const result = await query(
-    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
+    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background
      from public.sponsors
      where kind = 'discount'
      order by updated_at desc
@@ -369,28 +379,30 @@ export async function updateDiscountDb(payload: SponsorPayload, actor: Actor) {
 
   const result = id
     ? await query(
-        `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, updated_at = now()
+        `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, logo_background = $7, updated_at = now()
          where id = $1 and kind = 'discount'
-         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background`,
         [
           id,
           requiredText(payload.title, "Naslov je obavezan."),
           String(payload.subtitle || "").trim(),
           String(payload.logoUrl || "").trim(),
           String(payload.targetUrl || "").trim(),
-          payload.isActive !== false
+          payload.isActive !== false,
+          normalizeLogoBackground(payload.logoBackground)
         ]
       )
     : await query(
-        `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind)
-         values ($1, $2, $3, $4, $5, 'discount')
-         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+        `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind, logo_background)
+         values ($1, $2, $3, $4, $5, 'discount', $6)
+         returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background`,
         [
           requiredText(payload.title, "Naslov je obavezan."),
           String(payload.subtitle || "").trim(),
           String(payload.logoUrl || "").trim(),
           String(payload.targetUrl || "").trim(),
-          payload.isActive !== false
+          payload.isActive !== false,
+          normalizeLogoBackground(payload.logoBackground)
         ]
       );
 
@@ -405,7 +417,7 @@ export async function updateDiscountDb(payload: SponsorPayload, actor: Actor) {
 // roster admins curate over time, not one-off inserts.
 export async function listGeneralSponsorsDb({ activeOnly = true }: { activeOnly?: boolean } = {}) {
   const result = await query(
-    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active
+    `select id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background
      from public.sponsors
      where kind = 'general' ${activeOnly ? "and is_active = true" : ""}
      order by title`
@@ -415,14 +427,15 @@ export async function listGeneralSponsorsDb({ activeOnly = true }: { activeOnly?
 
 export async function createGeneralSponsorDb(payload: SponsorPayload, actor: Actor) {
   const result = await query(
-    `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind)
-     values ($1, $2, $3, $4, true, 'general')
-     returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+    `insert into public.sponsors (title, subtitle, logo_url, target_url, is_active, kind, logo_background)
+     values ($1, $2, $3, $4, true, 'general', $5)
+     returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background`,
     [
       requiredText(payload.title, "Naslov sponzora je obavezan."),
       String(payload.subtitle || "").trim(),
       String(payload.logoUrl || "").trim(),
-      String(payload.targetUrl || "").trim()
+      String(payload.targetUrl || "").trim(),
+      normalizeLogoBackground(payload.logoBackground)
     ]
   );
   await audit(actor, "sponsor.create", "sponsor", result.rows[0].id, { title: result.rows[0].title });
@@ -431,16 +444,17 @@ export async function createGeneralSponsorDb(payload: SponsorPayload, actor: Act
 
 export async function updateGeneralSponsorDb(id: string, payload: SponsorPayload, actor: Actor) {
   const result = await query(
-    `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, updated_at = now()
+    `update public.sponsors set title = $2, subtitle = $3, logo_url = $4, target_url = $5, is_active = $6, logo_background = $7, updated_at = now()
      where id = $1 and kind = 'general'
-     returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active`,
+     returning id, created_at, updated_at, title, subtitle, logo_url, target_url, is_active, logo_background`,
     [
       id,
       requiredText(payload.title, "Naslov sponzora je obavezan."),
       String(payload.subtitle || "").trim(),
       String(payload.logoUrl || "").trim(),
       String(payload.targetUrl || "").trim(),
-      payload.isActive !== false
+      payload.isActive !== false,
+      normalizeLogoBackground(payload.logoBackground)
     ]
   );
   if (!result.rows[0]) throw httpError(404, "Sponzor nije pronadjen.");
@@ -547,7 +561,8 @@ function normalizeSponsor(row: any) {
     subtitle: row.subtitle || "",
     logoUrl: row.logo_url || "",
     targetUrl: row.target_url || "",
-    isActive: row.is_active
+    isActive: row.is_active,
+    logoBackground: normalizeLogoBackground(row.logo_background)
   };
 }
 

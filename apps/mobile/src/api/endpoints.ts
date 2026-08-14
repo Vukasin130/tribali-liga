@@ -435,7 +435,7 @@ export function fetchSponsor() {
   return apiGet<Sponsor | null>("/sponsor");
 }
 
-export function updateSponsor(payload: { id?: string; title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }) {
+export function updateSponsor(payload: { id?: string; title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean; logoBackground?: "light" | "dark" }) {
   return apiPatch<Sponsor>("/admin/sponsor", payload);
 }
 
@@ -447,7 +447,7 @@ export function fetchDiscountForAdmin() {
   return apiGet<Sponsor | null>("/admin/discount");
 }
 
-export function updateDiscount(payload: { id?: string; title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }) {
+export function updateDiscount(payload: { id?: string; title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean; logoBackground?: "light" | "dark" }) {
   return apiPatch<Sponsor>("/admin/discount", payload);
 }
 
@@ -459,13 +459,13 @@ export function fetchAllGeneralSponsors() {
   return apiGet<Sponsor[]>("/admin/sponsors/general");
 }
 
-export function createGeneralSponsor(payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string }) {
+export function createGeneralSponsor(payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; logoBackground?: "light" | "dark" }) {
   return apiPost<Sponsor>("/admin/sponsors/general", payload);
 }
 
 export function updateGeneralSponsor(
   id: string,
-  payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean }
+  payload: { title: string; subtitle?: string; logoUrl?: string; targetUrl?: string; isActive?: boolean; logoBackground?: "light" | "dark" }
 ) {
   return apiPatch<Sponsor>(`/admin/sponsors/general/${id}`, payload);
 }

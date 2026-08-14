@@ -535,6 +535,12 @@ create table if not exists public.sponsors (
 -- shared one undifferentiated table and could overwrite/hijack each other.
 alter table public.sponsors add column if not exists kind text not null default 'weekly';
 
+-- Sponsor logos arrive with their own baked-in background (transparent, white, black,
+-- brand-colored, ...) - a single hardcoded white card behind every logo looks broken
+-- for any logo that isn't a transparent PNG on white. Admin picks 'light' or 'dark'
+-- per sponsor when uploading the logo, and the rendering tile matches it.
+alter table public.sponsors add column if not exists logo_background text not null default 'light';
+
 do $$
 begin
   alter table public.matches

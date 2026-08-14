@@ -27,6 +27,7 @@ import { Card, EmptyState, Pill, PrimaryButton, SectionTitle } from "../componen
 import { Pitch, PitchSlot } from "../components/Pitch";
 import { computeElapsedMinute, computeElapsedSeconds, formatClock, periodLabel } from "../utils/matchClock";
 import { kitGradientForTeam, PitchPlayerCard } from "../components/PitchPlayerCard";
+import { LogoBackgroundToggle } from "../components/LogoBackgroundToggle";
 
 type Phase = "setup" | "roster" | "live" | "review";
 type ActionType = "goal" | "shot_on_target" | "goalkeeper_save" | "yellow_card" | "red_card" | "foul" | "two_minutes";
@@ -430,7 +431,7 @@ export function LiveMatchAdminModal({
     }
   }
 
-  async function createAndAssignSponsor(payload: { title: string; logoUrl?: string; targetUrl?: string }) {
+  async function createAndAssignSponsor(payload: { title: string; logoUrl?: string; targetUrl?: string; logoBackground?: "light" | "dark" }) {
     const created = await createGeneralSponsor(payload);
     setSponsors((previous) => [...previous, created]);
     await assignSponsor(created.id);
@@ -1058,12 +1059,13 @@ function RosterPhase({
 
 function SponsorChip({ sponsor, active, onPress }: { sponsor: Sponsor; active: boolean; onPress: () => void }) {
   const [photoFailed, setPhotoFailed] = useState(false);
+  const dark = sponsor.logoBackground === "dark";
   return (
     <TouchableOpacity style={[styles.chip, styles.sponsorChip, active ? styles.chipActive : null]} onPress={onPress}>
       {sponsor.logoUrl && !photoFailed ? (
         <Image
           source={{ uri: sponsor.logoUrl }}
-          style={styles.sponsorChipLogo}
+          style={[styles.sponsorChipLogo, dark ? styles.sponsorChipLogoDark : null]}
           resizeMode="contain"
           onError={() => setPhotoFailed(true)}
         />
@@ -1082,12 +1084,13 @@ function SponsorPicker({
   sponsors: Sponsor[];
   selectedSponsorId: string;
   onAssign: (sponsorId: string) => void;
-  onCreate: (payload: { title: string; logoUrl?: string; targetUrl?: string }) => Promise<void>;
+  onCreate: (payload: { title: string; logoUrl?: string; targetUrl?: string; logoBackground?: "light" | "dark" }) => Promise<void>;
 }) {
   const [showNewForm, setShowNewForm] = useState(false);
   const [title, setTitle] = useState("");
   const [targetUrl, setTargetUrl] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
+  const [logoBackground, setLogoBackground] = useState<"light" | "dark">("light");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pickError, setPickError] = useState("");
@@ -1113,10 +1116,11 @@ function SponsorPicker({
     if (!title.trim()) return;
     setSaving(true);
     try {
-      await onCreate({ title: title.trim(), logoUrl: logoUrl || undefined, targetUrl: targetUrl.trim() || undefined });
+      await onCreate({ title: title.trim(), logoUrl: logoUrl || undefined, targetUrl: targetUrl.trim() || undefined, logoBackground });
       setTitle("");
       setTargetUrl("");
       setLogoUrl("");
+      setLogoBackground("light");
       setShowNewForm(false);
     } finally {
       setSaving(false);
@@ -1156,11 +1160,17 @@ function SponsorPicker({
             autoCapitalize="none"
           />
           {logoUrl && !photoFailed ? (
-            <Image source={{ uri: logoUrl }} style={styles.sponsorLogoPreview} resizeMode="contain" onError={() => setPhotoFailed(true)} />
+            <Image
+              source={{ uri: logoUrl }}
+              style={[styles.sponsorLogoPreview, logoBackground === "dark" ? styles.sponsorLogoPreviewDark : null]}
+              resizeMode="contain"
+              onError={() => setPhotoFailed(true)}
+            />
           ) : null}
           <TouchableOpacity style={styles.secondaryButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.secondaryButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni logo" : "Dodaj logo"}</Text>
           </TouchableOpacity>
+          {logoUrl ? <LogoBackgroundToggle value={logoBackground} onChange={setLogoBackground} /> : null}
           {pickError ? <Text style={styles.errorText}>{pickError}</Text> : null}
           <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj sponzora"} onPress={handleCreate} loading={saving} disabled={!title.trim() || !logoUrl} />
         </View>
@@ -1493,6 +1503,7 @@ const styles = StyleSheet.create({
   chipTextActive: { color: "#fff" },
   sponsorChip: { flexDirection: "row", alignItems: "center", gap: 8 },
   sponsorChipLogo: { width: 20, height: 20, borderRadius: 5, backgroundColor: "#fff" },
+  sponsorChipLogoDark: { backgroundColor: colors.ink },
   input: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: 14,
@@ -1601,6 +1612,7 @@ const styles = StyleSheet.create({
   linkText: { color: colors.purple, fontWeight: "700", fontSize: 13 },
   newForm: { gap: 10, backgroundColor: colors.surfaceMuted, borderRadius: 16, padding: 12 },
   sponsorLogoPreview: { width: 64, height: 64, borderRadius: 12, alignSelf: "center", backgroundColor: "#fff" },
+  sponsorLogoPreviewDark: { backgroundColor: colors.ink },
   selectedPlayerRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   selectedPlayerName: { color: colors.ink, fontWeight: "800", fontSize: 16 },
   actionsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },

@@ -1162,16 +1162,17 @@ model profiles {
 
 /// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
 model sponsors {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  created_at DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at DateTime  @default(now()) @db.Timestamptz(6)
-  title      String
-  subtitle   String?
-  logo_url   String?
-  target_url String?
-  is_active  Boolean   @default(true)
-  kind       String    @default("weekly")
-  matches    matches[]
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @db.Timestamptz(6)
+  title           String
+  subtitle        String?
+  logo_url        String?
+  target_url      String?
+  is_active       Boolean   @default(true)
+  kind            String    @default("weekly")
+  logo_background String    @default("light")
+  matches         matches[]
 
   @@schema("public")
 }
