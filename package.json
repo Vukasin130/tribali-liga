@@ -23,7 +23,7 @@
     "check": "npm --workspace apps/mobile exec tsc -- --noEmit && npm --workspace apps/desktop exec tsc -- --noEmit"
   },
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=24.0.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4"
