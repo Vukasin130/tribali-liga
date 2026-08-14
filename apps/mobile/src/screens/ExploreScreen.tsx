@@ -391,7 +391,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11
   },
-  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15 },
+  // outlineStyle: "none" is a react-native-web-only value (@types/react-native's own
+  // TextStyle only knows the native solid/dotted/dashed outline feature, not the web
+  // CSS keyword - "as any" bridges that) - without it, focusing this input draws the
+  // browser's own default focus ring, a solid black rectangle spanning the full width
+  // of the search bar, since no border was ever styled in to mask it.
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 15, outlineStyle: "none" as any },
   statTabs: { flexDirection: "row", gap: 8, marginHorizontal: 18, marginTop: 14 },
   statTab: { flex: 1, paddingVertical: 9, borderRadius: 12, backgroundColor: colors.surfaceMuted, alignItems: "center" },
   statTabActive: { backgroundColor: colors.ink },
