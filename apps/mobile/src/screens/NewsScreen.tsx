@@ -337,7 +337,7 @@ export function NewsScreen() {
                   <View style={styles.newsCard}>
                     <NewsThumb mediaUrl={item.mediaUrl} style={styles.newsCardThumb} />
                     <View style={styles.newsCardText}>
-                      <Text style={styles.newsTitleCompact} numberOfLines={2}>{item.title}</Text>
+                      <Text style={[styles.newsTitleCompact, styles.newsCardTitle]} numberOfLines={2}>{item.title}</Text>
                       <Text style={styles.newsMeta}>{formatDate(item.publishedAt)}</Text>
                     </View>
                   </View>
@@ -829,12 +829,15 @@ const styles = StyleSheet.create({
     padding: 14
   },
   newsRowText: { flex: 1, gap: 4 },
-  newsTitleCompact: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
+  newsTitleCompact: { color: colors.textPrimary, fontWeight: "700", fontSize: 14, lineHeight: 18 },
   newsMeta: { color: colors.textMuted, fontSize: 12 },
   newsRowThumb: { width: 64, height: 64, borderRadius: 12 },
   newsRowThumbPlaceholder: { backgroundColor: colors.surfaceMuted },
+  // flex: 1 (not a fixed width) so the row's 3 cards always stretch to share the
+  // full available width evenly, flush with both edges, instead of sitting at a
+  // fixed size with leftover space on the right when the container is wider.
   newsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 18 },
-  newsGridItem: { width: 330 },
+  newsGridItem: { flex: 1, minWidth: 260 },
   newsCard: {
     backgroundColor: colors.card,
     borderRadius: 18,
@@ -843,5 +846,9 @@ const styles = StyleSheet.create({
     overflow: "hidden"
   },
   newsCardThumb: { width: "100%", height: 170 },
-  newsCardText: { padding: 14, gap: 6 }
+  newsCardText: { padding: 14, gap: 6 },
+  // Reserves space for a full 2 lines regardless of whether this particular title
+  // actually wraps to 2 lines - otherwise a short one-line title makes its card
+  // shorter than its neighbors and the row's bottom edges fall out of alignment.
+  newsCardTitle: { height: 36 }
 });
