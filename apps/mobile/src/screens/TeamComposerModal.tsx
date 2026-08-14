@@ -13,15 +13,20 @@ export function TeamComposerModal({
   onClose,
   onSaved
 }: {
-  competitionId: string;
-  existingTeamNames: string[];
+  // Absent when opened from Explore's standalone "Nova ekipa" entry point, instead of
+  // from within a league's own team list - in that mode this is purely a club/roster
+  // registration (no competition to add it to yet), so the "pick an existing club to
+  // add here" half of this screen doesn't apply and is skipped entirely.
+  competitionId?: string;
+  existingTeamNames?: string[];
   onClose: () => void;
   onSaved: (team: Team) => void;
 }) {
+  const standalone = !competitionId;
   const [clubs, setClubs] = useState<Club[]>([]);
-  const [clubsLoading, setClubsLoading] = useState(true);
+  const [clubsLoading, setClubsLoading] = useState(!standalone);
   const [addingClubId, setAddingClubId] = useState("");
-  const [showNewForm, setShowNewForm] = useState(false);
+  const [showNewForm, setShowNewForm] = useState(standalone);
   const [name, setName] = useState("");
   const [shortName, setShortName] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -30,6 +35,7 @@ export function TeamComposerModal({
   const isWide = useIsWideScreen();
 
   useEffect(() => {
+    if (standalone) return;
     let cancelled = false;
     setClubsLoading(true);
     fetchClubs()
@@ -43,12 +49,13 @@ export function TeamComposerModal({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [standalone]);
 
-  const existingNamesLower = useMemo(() => new Set(existingTeamNames.map((n) => n.trim().toLowerCase())), [existingTeamNames]);
+  const existingNamesLower = useMemo(() => new Set((existingTeamNames ?? []).map((n) => n.trim().toLowerCase())), [existingTeamNames]);
   const pickableClubs = clubs.filter((club) => !existingNamesLower.has(club.name.trim().toLowerCase()));
 
   async function handleAddClub(club: Club) {
+    if (!competitionId) return;
     setAddingClubId(club.id);
     setError("");
     try {
@@ -96,37 +103,46 @@ export function TeamComposerModal({
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
         <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
-          <Text style={styles.title}>Dodaj ekipu</Text>
-
-          <Text style={styles.label}>Postojeci klubovi iz baze</Text>
-          {clubsLoading ? (
-            <ActivityIndicator color={colors.purple} />
-          ) : pickableClubs.length === 0 ? (
+          <Text style={styles.title}>{standalone ? "Nova ekipa" : "Dodaj ekipu"}</Text>
+          {standalone ? (
             <Text style={styles.hint}>
-              {clubs.length === 0 ? "Baza jos nema nijedan klub." : "Svi poznati klubovi su vec u ovoj ligi."}
+              Ekipa se cuva u bazi kao klub - kasnije je dodajes u ligu iz uredjivanja te lige, sa svim igracima.
             </Text>
-          ) : (
-            <View style={styles.clubList}>
-              {pickableClubs.map((club) => (
-                <TouchableOpacity
-                  key={club.id}
-                  style={styles.clubRow}
-                  onPress={() => handleAddClub(club)}
-                  disabled={!!addingClubId}
-                >
-                  <View style={styles.flex1}>
-                    <Text style={styles.clubName}>{club.name}</Text>
-                    <Text style={styles.clubMeta}>{clubMeta(club)}</Text>
-                  </View>
-                  {addingClubId === club.id ? (
-                    <ActivityIndicator color={colors.purple} size="small" />
-                  ) : (
-                    <Text style={styles.clubAddText}>Dodaj sa igracima</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          ) : null}
+
+          {!standalone ? (
+            <>
+              <Text style={styles.label}>Postojeci klubovi iz baze</Text>
+              {clubsLoading ? (
+                <ActivityIndicator color={colors.purple} />
+              ) : pickableClubs.length === 0 ? (
+                <Text style={styles.hint}>
+                  {clubs.length === 0 ? "Baza jos nema nijedan klub." : "Svi poznati klubovi su vec u ovoj ligi."}
+                </Text>
+              ) : (
+                <View style={styles.clubList}>
+                  {pickableClubs.map((club) => (
+                    <TouchableOpacity
+                      key={club.id}
+                      style={styles.clubRow}
+                      onPress={() => handleAddClub(club)}
+                      disabled={!!addingClubId}
+                    >
+                      <View style={styles.flex1}>
+                        <Text style={styles.clubName}>{club.name}</Text>
+                        <Text style={styles.clubMeta}>{clubMeta(club)}</Text>
+                      </View>
+                      {addingClubId === club.id ? (
+                        <ActivityIndicator color={colors.purple} size="small" />
+                      ) : (
+                        <Text style={styles.clubAddText}>Dodaj sa igracima</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </>
+          ) : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -136,7 +152,7 @@ export function TeamComposerModal({
             </TouchableOpacity>
           ) : (
             <View style={styles.newForm}>
-              <Text style={styles.label}>Nova ekipa</Text>
+              {!standalone ? <Text style={styles.label}>Nova ekipa</Text> : null}
               <TextInput
                 style={styles.input}
                 placeholder="Naziv ekipe"
@@ -151,13 +167,15 @@ export function TeamComposerModal({
                 value={shortName}
                 onChangeText={setShortName}
               />
-              <TextInput
-                style={styles.input}
-                placeholder="Grupa (opciono)"
-                placeholderTextColor="#9c9186"
-                value={groupName}
-                onChangeText={setGroupName}
-              />
+              {!standalone ? (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Grupa (opciono)"
+                  placeholderTextColor="#9c9186"
+                  value={groupName}
+                  onChangeText={setGroupName}
+                />
+              ) : null}
               <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj novu ekipu"} onPress={handleSaveNew} loading={saving} />
             </View>
           )}

@@ -165,7 +165,7 @@ export function deleteCompetition(competitionId: string) {
   return apiDelete<{ id: string; deleted: boolean }>(`/admin/competitions/${competitionId}`);
 }
 
-export function createTeam(payload: { competitionId: string; name: string; shortName?: string; groupName?: string }) {
+export function createTeam(payload: { competitionId?: string; name: string; shortName?: string; groupName?: string }) {
   return apiPost<Team>("/admin/teams", payload);
 }
 

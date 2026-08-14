@@ -11,9 +11,11 @@ import { colors } from "../theme/colors";
 import { useCompetition } from "../state/CompetitionContext";
 import { TeamProfileModal } from "./TeamProfileModal";
 import { PlayerProfileModal } from "./PlayerProfileModal";
+import { TeamComposerModal } from "./TeamComposerModal";
 import { SponsorStrip } from "../components/SponsorStrip";
 import { TeamCrest } from "../components/TeamCrest";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
+import { useAuth } from "../state/AuthContext";
 
 type Section = "home" | "players" | "teams" | "stats";
 type StatCategory = "table" | "goals" | "assists" | "saves" | "mvp";
@@ -31,6 +33,8 @@ export function ExploreScreen() {
   // league for stats is kept local to this screen so picking one here doesn't change what
   // Seasons/Profile/etc. show elsewhere in the app.
   const { competitions } = useCompetition();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const isWide = useIsWideScreen();
   const [section, setSection] = useState<Section>("home");
   const [search, setSearch] = useState("");
@@ -38,6 +42,7 @@ export function ExploreScreen() {
   const [statsCompetitionId, setStatsCompetitionId] = useState("");
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
+  const [showTeamComposer, setShowTeamComposer] = useState(false);
 
   useEffect(() => {
     if (statsCompetitionId || competitions.length === 0) return;
@@ -246,6 +251,12 @@ export function ExploreScreen() {
               </TouchableOpacity>
             ))}
           </View>
+          {isAdmin ? (
+            <TouchableOpacity style={styles.addTeamButton} onPress={() => setShowTeamComposer(true)}>
+              <Ionicons name="add-circle-outline" size={18} color={colors.purple} />
+              <Text style={styles.addTeamButtonText}>Nova ekipa</Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
       ) : null}
 
@@ -288,6 +299,15 @@ export function ExploreScreen() {
 
       {activeTeamId ? <TeamProfileModal teamId={activeTeamId} onClose={() => setActiveTeamId(null)} /> : null}
       {activePlayerId ? <PlayerProfileModal playerId={activePlayerId} onClose={() => setActivePlayerId(null)} /> : null}
+      {showTeamComposer ? (
+        <TeamComposerModal
+          onClose={() => setShowTeamComposer(false)}
+          onSaved={() => {
+            setShowTeamComposer(false);
+            clubsQuery.refetch();
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -380,6 +400,19 @@ const styles = StyleSheet.create({
   listContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 40, gap: 4 },
   listContentWide: { paddingHorizontal: 32, paddingTop: 20 },
   searchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  addTeamButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: colors.line
+  },
+  addTeamButtonText: { color: colors.purple, fontWeight: "700", fontSize: 13 },
   standingsGridWide: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
   standingsGridItem: { width: 480 },
   searchRow: {
