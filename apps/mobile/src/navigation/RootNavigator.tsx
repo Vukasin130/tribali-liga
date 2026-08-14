@@ -7,14 +7,17 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../state/AuthContext";
 import { LoginScreen } from "../screens/LoginScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
+import { ForgotPasswordScreen } from "../screens/ForgotPasswordScreen";
 import { NewsScreen } from "../screens/NewsScreen";
 import { FantasyScreen } from "../screens/FantasyScreen";
 import { SeasonsScreen } from "../screens/SeasonsScreen";
 import { ExploreScreen } from "../screens/ExploreScreen";
+import { StatisticsScreen } from "../screens/StatisticsScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 import { CompetitionProvider } from "../state/CompetitionContext";
 import { LoadingState } from "../components/ui";
 import { colors } from "../theme/colors";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import type { AuthStackParamList, MainTabParamList } from "./types";
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -37,6 +40,7 @@ const tabIconName: Record<keyof MainTabParamList, keyof typeof Ionicons.glyphMap
   Fantasy: "shirt-outline",
   Seasons: "trophy-outline",
   Explore: "search-outline",
+  Statistics: "bar-chart-outline",
   Profile: "person-outline"
 };
 
@@ -49,6 +53,12 @@ function TabIcon({ name, focused }: { name: keyof typeof Ionicons.glyphMap; focu
 }
 
 function MainTabNavigator() {
+  const { user } = useAuth();
+  const isWide = useIsWideScreen();
+  // Statistics is deliberately not just hidden but absent as a route - it never exists
+  // on mobile (isWide is hardcoded false there) or for non-admins, not just tucked away.
+  const showStatistics = isWide && user?.role === "admin";
+
   return (
     <CompetitionProvider>
       <MainTabs.Navigator
@@ -70,6 +80,9 @@ function MainTabNavigator() {
         <MainTabs.Screen name="Fantasy" component={FantasyScreen} options={{ title: "Fantasy" }} />
         <MainTabs.Screen name="Seasons" component={SeasonsScreen} options={{ title: "Seasons" }} />
         <MainTabs.Screen name="Explore" component={ExploreScreen} options={{ title: "Explore" }} />
+        {showStatistics ? (
+          <MainTabs.Screen name="Statistics" component={StatisticsScreen} options={{ title: "Statistika" }} />
+        ) : null}
         <MainTabs.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />
       </MainTabs.Navigator>
     </CompetitionProvider>
@@ -81,6 +94,7 @@ function AuthNavigator() {
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Register" component={RegisterScreen} />
+      <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     </AuthStack.Navigator>
   );
 }

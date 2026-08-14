@@ -2,18 +2,35 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { fetchCompetitionTeams, fetchMyVerificationRequests, fetchProfile, fetchTeamPlayers, requestVerification, updateProfile } from "../api/endpoints";
+import {
+  deleteAccount,
+  fetchCompetitionTeams,
+  fetchDiscount,
+  fetchDiscountForAdmin,
+  fetchMyAvailabilityRequests,
+  fetchMyVerificationRequests,
+  fetchProfile,
+  fetchTeamPlayers,
+  requestVerification,
+  setMatchAvailability,
+  updateProfile
+} from "../api/endpoints";
 import { ApiError } from "../api/client";
-import type { Player, Profile, Team, VerificationRequest } from "../api/types";
+import type { MatchAvailabilityRequest, Player, Profile, Sponsor, Team, VerificationRequest } from "../api/types";
 import { Card, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
 import { colors } from "../theme/colors";
 import { useAuth } from "../state/AuthContext";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { useCompetition } from "../state/CompetitionContext";
+import { DiscountEditorModal } from "./DiscountEditorModal";
 import { LegalScreen } from "./LegalScreen";
+import { NotificationComposerModal } from "./NotificationComposerModal";
+import { SponsorsManagerModal } from "./SponsorsManagerModal";
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
   const { competitionId } = useCompetition();
+  const isWide = useIsWideScreen();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(true);
@@ -21,6 +38,10 @@ export function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [legalScreen, setLegalScreen] = useState<"privacy" | "terms" | null>(null);
+  const [showNotificationComposer, setShowNotificationComposer] = useState(false);
+  const [showSponsorsManager, setShowSponsorsManager] = useState(false);
+  const [discount, setDiscount] = useState<Sponsor | null>(null);
+  const [showDiscountEditor, setShowDiscountEditor] = useState(false);
 
   const [requests, setRequests] = useState<VerificationRequest[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -31,6 +52,12 @@ export function ProfileScreen() {
   const [showVerifyForm, setShowVerifyForm] = useState(false);
   const [verifySubmitting, setVerifySubmitting] = useState(false);
   const [verifyError, setVerifyError] = useState("");
+  const [availabilityRequests, setAvailabilityRequests] = useState<MatchAvailabilityRequest[]>([]);
+  const [respondingMatchId, setRespondingMatchId] = useState("");
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     fetchProfile()
@@ -44,7 +71,32 @@ export function ProfileScreen() {
     fetchMyVerificationRequests()
       .then(setRequests)
       .catch(() => undefined);
+
+    fetchMyAvailabilityRequests()
+      .then(setAvailabilityRequests)
+      .catch(() => undefined);
   }, []);
+
+  // Admin sees the record even while it's turned off (so they can re-enable it without
+  // retyping everything); everyone else only sees it once it's actually active.
+  function loadDiscount() {
+    const loader = profile?.role === "admin" ? fetchDiscountForAdmin : fetchDiscount;
+    loader().then(setDiscount).catch(() => undefined);
+  }
+
+  useEffect(loadDiscount, [profile?.role]);
+
+  async function handleRespondAvailability(matchId: string, status: "playing" | "not_playing") {
+    setRespondingMatchId(matchId);
+    try {
+      const updated = await setMatchAvailability(matchId, status);
+      setAvailabilityRequests((previous) => previous.map((item) => (item.matchId === matchId ? { ...item, status: updated.status, respondedAt: updated.respondedAt } : item)));
+    } catch {
+      // Silent - the request stays in the list so the player can just try again.
+    } finally {
+      setRespondingMatchId("");
+    }
+  }
 
   useEffect(() => {
     if (!competitionId) return;
@@ -78,6 +130,23 @@ export function ProfileScreen() {
       setError(err instanceof Error ? err.message : "Cuvanje nije uspelo.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (!deletePassword) {
+      setDeleteError("Unesi lozinku.");
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteAccount(deletePassword);
+      await logout();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Nalog nije obrisan.");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -118,7 +187,7 @@ export function ProfileScreen() {
   const name = profile?.displayName ?? user?.displayName ?? "";
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, isWide ? styles.contentWide : null]}>
       <View style={styles.header}>
         <Text style={styles.headerKicker}>Profil</Text>
         <Text style={styles.headerTitle}>Nalog</Text>
@@ -162,10 +231,21 @@ export function ProfileScreen() {
 
       {isAdmin ? (
         <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Verifikacija igraca</Text>
+          <Text style={styles.cardTitle}>Sponzori</Text>
           <Text style={styles.helperText}>
-            Kao administrator, ne igras fantasy i ne treba ti oznaka verifikovanog igraca - ti odobravas ili odbijas tudje zahteve za verifikaciju iz admin panela ("Verifikacija igraca").
+            Upravljaj sponzorima koji se prikazuju kao traka logoa kroz aplikaciju.
           </Text>
+          <PrimaryButton label="Otvori sponzore" onPress={() => setShowSponsorsManager(true)} />
+        </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Notifikacije</Text>
+          <Text style={styles.helperText}>
+            Posalji push notifikaciju svim korisnicima koji su dozvolili notifikacije (npr. najava novog kola, rezultat, vazna vest).
+          </Text>
+          <PrimaryButton label="Posalji notifikaciju" onPress={() => setShowNotificationComposer(true)} />
         </Card>
       ) : isApprovedPlayer ? (
         <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.verifiedCard}>
@@ -206,7 +286,7 @@ export function ProfileScreen() {
                       onPress={() => setTeamId(team.id)}
                     >
                       <Text style={[styles.teamChipText, teamId === team.id ? styles.teamChipTextActive : null]} numberOfLines={1}>
-                        {team.shortName || team.name}
+                        {team.name || team.shortName}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -253,17 +333,106 @@ export function ProfileScreen() {
         </Card>
       )}
 
-      <Card style={styles.card}>
-        <View style={styles.sponsorRow}>
-          <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>10% popusta kod partnera lige</Text>
-            <Text style={styles.helperText}>Profil moze da nosi QR kupon ili kod za popust.</Text>
+      {isApprovedPlayer && availabilityRequests.length > 0 ? (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Da li igras?</Text>
+          <Text style={styles.helperText}>
+            Javi se pre utakmice da fantazi menadzeri znaju da li da te stavljaju u tim.
+          </Text>
+          {availabilityRequests.map((request) => (
+            <View key={request.id} style={styles.availabilityRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.availabilityMatch}>
+                  {request.homeTeamName} - {request.awayTeamName}
+                </Text>
+                <Text style={styles.helperText}>{formatMatchDate(request.scheduledAt)}</Text>
+              </View>
+              {request.status === "unknown" ? (
+                <View style={styles.availabilityButtons}>
+                  <TouchableOpacity
+                    style={[styles.availabilityButton, styles.availabilityButtonYes]}
+                    disabled={respondingMatchId === request.matchId}
+                    onPress={() => handleRespondAvailability(request.matchId, "playing")}
+                  >
+                    <Text style={styles.availabilityButtonYesText}>Igram</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.availabilityButton, styles.availabilityButtonNo]}
+                    disabled={respondingMatchId === request.matchId}
+                    onPress={() => handleRespondAvailability(request.matchId, "not_playing")}
+                  >
+                    <Text style={styles.availabilityButtonNoText}>Ne igram</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Pill
+                  label={request.status === "playing" ? "Igras" : "Ne igras"}
+                  tone={request.status === "playing" ? "success" : "danger"}
+                />
+              )}
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
+      {isAdmin ? (
+        <Card style={styles.card}>
+          <View style={styles.sponsorRow}>
+            <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>{discount?.title || "Popust kod partnera"}</Text>
+              <Text style={styles.helperText}>
+                {discount?.subtitle || "Jos nije podeseno - dodaj naslov, kod i po zelji QR sliku."}
+              </Text>
+            </View>
+            <Pill label={discount?.isActive === false ? "Neaktivan" : discount ? "Aktivan" : "Prazan"} tone={discount?.isActive === false ? "neutral" : discount ? "success" : "neutral"} />
           </View>
-        </View>
-      </Card>
+          <PrimaryButton label={discount ? "Uredi popust" : "Podesi popust"} variant="ghost" onPress={() => setShowDiscountEditor(true)} />
+        </Card>
+      ) : discount ? (
+        <Card style={styles.card}>
+          <View style={styles.sponsorRow}>
+            <Ionicons name="qr-code-outline" size={22} color={colors.purple} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>{discount.title}</Text>
+              {discount.subtitle ? <Text style={styles.helperText}>{discount.subtitle}</Text> : null}
+            </View>
+          </View>
+        </Card>
+      ) : null}
 
       <PrimaryButton label="Odjava" onPress={logout} variant="danger" />
+
+      {showDeleteAccount ? (
+        <Card style={styles.card}>
+          <Text style={styles.cardTitle}>Obrisi nalog</Text>
+          <Text style={styles.helperText}>
+            Ovo trajno brise tvoj nalog i sve podatke vezane za njega. Unesi lozinku da potvrdis.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={deletePassword}
+            onChangeText={setDeletePassword}
+            placeholder="Lozinka"
+            placeholderTextColor={colors.textMuted}
+            secureTextEntry
+          />
+          {deleteError ? <Text style={styles.errorText}>{deleteError}</Text> : null}
+          <PrimaryButton
+            label={deleting ? "Brisanje..." : "Potvrdi brisanje naloga"}
+            onPress={handleDeleteAccount}
+            loading={deleting}
+            variant="danger"
+          />
+          <Text style={styles.legalLink} onPress={() => { setShowDeleteAccount(false); setDeletePassword(""); setDeleteError(""); }}>
+            Otkazi
+          </Text>
+        </Card>
+      ) : (
+        <Text style={styles.deleteAccountLink} onPress={() => setShowDeleteAccount(true)}>
+          Obrisi nalog
+        </Text>
+      )}
 
       <View style={styles.legalRow}>
         <Text style={styles.legalLink} onPress={() => setLegalScreen("terms")}>Uslovi koriscenja</Text>
@@ -272,8 +441,28 @@ export function ProfileScreen() {
       </View>
 
       {legalScreen ? <LegalScreen kind={legalScreen} onClose={() => setLegalScreen(null)} /> : null}
+      {showNotificationComposer ? <NotificationComposerModal onClose={() => setShowNotificationComposer(false)} /> : null}
+      {showSponsorsManager ? (
+        <SponsorsManagerModal onClose={() => setShowSponsorsManager(false)} onChanged={() => undefined} />
+      ) : null}
+      {showDiscountEditor ? (
+        <DiscountEditorModal
+          discount={discount}
+          onClose={() => setShowDiscountEditor(false)}
+          onSaved={() => {
+            setShowDiscountEditor(false);
+            loadDiscount();
+          }}
+        />
+      ) : null}
     </ScrollView>
   );
+}
+
+function formatMatchDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("sr-RS", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function MetricBox({ label, value }: { label: string; value: string }) {
@@ -312,6 +501,7 @@ function verificationLabel(status?: string, pendingRequest?: VerificationRequest
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 18, paddingTop: 58, gap: 14, paddingBottom: 40 },
+  contentWide: { maxWidth: 640, alignSelf: "center", width: "100%", paddingTop: 48, gap: 18 },
   header: {},
   headerKicker: { color: colors.purple, fontWeight: "700", fontSize: 12, textTransform: "uppercase" },
   headerTitle: { color: colors.ink, fontSize: 26, fontWeight: "700" },
@@ -327,6 +517,21 @@ const styles = StyleSheet.create({
   label: { color: colors.textMuted, fontWeight: "700", fontSize: 12, marginTop: 8 },
   value: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
   helperText: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  availabilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.line
+  },
+  availabilityMatch: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
+  availabilityButtons: { flexDirection: "row", gap: 8 },
+  availabilityButton: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1 },
+  availabilityButtonYes: { backgroundColor: "rgba(8,122,74,0.1)", borderColor: colors.success },
+  availabilityButtonYesText: { color: colors.success, fontWeight: "700", fontSize: 12 },
+  availabilityButtonNo: { backgroundColor: "rgba(160,24,61,0.1)", borderColor: colors.danger },
+  availabilityButtonNoText: { color: colors.danger, fontWeight: "700", fontSize: 12 },
   input: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: 12,
@@ -371,5 +576,6 @@ const styles = StyleSheet.create({
   sponsorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   legalRow: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 4 },
   legalLink: { color: colors.textMuted, fontSize: 12, fontWeight: "700", textDecorationLine: "underline" },
-  legalDivider: { color: colors.textMuted, fontSize: 12 }
+  legalDivider: { color: colors.textMuted, fontSize: 12 },
+  deleteAccountLink: { color: colors.danger, fontSize: 12, fontWeight: "700", textAlign: "center", marginTop: 2 }
 });

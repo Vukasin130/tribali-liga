@@ -1,6 +1,7 @@
 export type AuthStackParamList = {
   Login: undefined;
   Register: undefined;
+  ForgotPassword: undefined;
 };
 
 export type MainTabParamList = {
@@ -8,5 +9,6 @@ export type MainTabParamList = {
   Fantasy: undefined;
   Seasons: undefined;
   Explore: undefined;
+  Statistics: undefined;
   Profile: undefined;
 };

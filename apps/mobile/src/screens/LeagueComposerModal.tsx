@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { configureCompetition, createCompetition, deleteCompetition, listCities, updateCompetition } from "../api/endpoints";
+import { configureCompetition, createCity, createCompetition, deleteCompetition, listCities, updateCompetition } from "../api/endpoints";
 import type { City, Competition } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 type FormatType = "league" | "tournament";
@@ -21,6 +23,8 @@ export function LeagueComposerModal({
   const isEditing = Boolean(editingCompetition);
   const [cities, setCities] = useState<City[]>([]);
   const [cityId, setCityId] = useState(editingCompetition?.cityId || "");
+  const [newCityName, setNewCityName] = useState("");
+  const [addingCity, setAddingCity] = useState(false);
   const [name, setName] = useState(editingCompetition?.name || "");
   const [seasonName, setSeasonName] = useState(editingCompetition?.seasonName || "");
   const [format, setFormat] = useState<FormatType>("league");
@@ -30,6 +34,7 @@ export function LeagueComposerModal({
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
 
   useEffect(() => {
     listCities()
@@ -39,6 +44,22 @@ export function LeagueComposerModal({
       })
       .catch(() => undefined);
   }, []);
+
+  async function handleAddCity() {
+    if (!newCityName.trim()) return;
+    setAddingCity(true);
+    setError("");
+    try {
+      const city = await createCity({ name: newCityName.trim() });
+      setCities((previous) => [...previous, city]);
+      setCityId(city.id);
+      setNewCityName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Grad nije sacuvan.");
+    } finally {
+      setAddingCity(false);
+    }
+  }
 
   async function handleSave() {
     if (!name.trim()) {
@@ -118,12 +139,12 @@ export function LeagueComposerModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>{isEditing ? "Izmeni ligu" : "Nova liga"}</Text>
 
-          {cities.length > 0 ? (
-            <View style={styles.field}>
-              <Text style={styles.label}>Grad</Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>Grad</Text>
+            {cities.length > 0 ? (
               <View style={styles.chipsRow}>
                 {cities.map((city) => (
                   <TouchableOpacity
@@ -135,8 +156,20 @@ export function LeagueComposerModal({
                   </TouchableOpacity>
                 ))}
               </View>
+            ) : null}
+            <View style={styles.newCityRow}>
+              <TextInput
+                style={[styles.input, styles.newCityInput]}
+                placeholder="Novi grad"
+                placeholderTextColor="#9c9186"
+                value={newCityName}
+                onChangeText={setNewCityName}
+              />
+              <TouchableOpacity style={styles.addCityButton} onPress={handleAddCity} disabled={addingCity}>
+                <Text style={styles.addCityButtonText}>{addingCity ? "Cuvanje..." : "Dodaj"}</Text>
+              </TouchableOpacity>
             </View>
-          ) : null}
+          </View>
 
           <TextInput
             style={styles.input}
@@ -247,6 +280,10 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.purple, borderColor: colors.purple },
   chipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
   chipTextActive: { color: "#fff" },
+  newCityRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  newCityInput: { flex: 1 },
+  addCityButton: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.line },
+  addCityButtonText: { color: colors.purple, fontWeight: "700" },
   row: { flexDirection: "row", gap: 12 },
   flex1: { flex: 1 },
   hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },

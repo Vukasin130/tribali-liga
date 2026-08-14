@@ -2,14 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Image,
+  ImageStyle,
+  Linking,
   NativeScrollEvent,
   NativeSyntheticEvent,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  StyleProp,
   Text,
   TouchableOpacity,
-  View
+  View,
+  ViewStyle
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -36,10 +40,12 @@ import { GoalPollComposerModal } from "./GoalPollComposerModal";
 import { SponsorEditorModal } from "./SponsorEditorModal";
 import { LiveMatchesModal } from "./LiveMatchesModal";
 import { useAuth } from "../state/AuthContext";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
 export function NewsScreen() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isWide = useIsWideScreen();
 
   const [news, setNews] = useState<NewsFeed | null>(null);
   const [stories, setStories] = useState<StoryFolder[]>([]);
@@ -201,27 +207,37 @@ export function NewsScreen() {
     <>
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, isWide ? styles.contentWide : null]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.purple} />}
     >
-      <View style={styles.brandRow}>
+      <View style={[styles.brandRow, isWide ? styles.brandRowWide : null]}>
         <View style={styles.brandLeft}>
-          <Image source={require("../../assets/icon.png")} style={styles.brandMark} resizeMode="cover" />
+          <Image
+            source={require("../../assets/icon.png")}
+            style={[styles.brandMark, isWide ? styles.brandMarkWide : null]}
+            resizeMode="cover"
+          />
           <View>
-            <Text style={styles.brandName}>Tribali</Text>
-            <Text style={styles.brandName}>Liga</Text>
+            {isWide ? (
+              <Text style={[styles.brandName, styles.brandNameWide]}>Tribali Liga</Text>
+            ) : (
+              <>
+                <Text style={styles.brandName}>Tribali</Text>
+                <Text style={styles.brandName}>Liga</Text>
+              </>
+            )}
           </View>
         </View>
-        <TouchableOpacity style={styles.liveChip} onPress={() => setShowLiveMatches(true)}>
+        <TouchableOpacity style={[styles.liveChip, isWide ? styles.liveChipWide : null]} onPress={() => setShowLiveMatches(true)}>
           {liveMatches.length > 0 ? <Animated.View style={[styles.liveDot, { opacity: pulseAnim }]} /> : null}
-          <Ionicons name="notifications-outline" size={14} color={colors.ink} />
-          <Text style={styles.liveChipText}>Live</Text>
+          <Ionicons name="notifications-outline" size={isWide ? 18 : 14} color={colors.ink} />
+          <Text style={[styles.liveChipText, isWide ? styles.liveChipTextWide : null]}>Live</Text>
         </TouchableOpacity>
       </View>
 
       {error ? <ErrorState message={error} onRetry={load} /> : null}
 
-      {stories.length > 0 || isAdmin ? (
+      {!isWide && (stories.length > 0 || isAdmin) ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesRow}>
           {isAdmin ? (
             <TouchableOpacity style={styles.storyBubble} onPress={() => setShowStoryComposer(true)}>
@@ -237,13 +253,7 @@ export function NewsScreen() {
             <TouchableOpacity key={folder.id} style={styles.storyBubble} onPress={() => setActiveStoryFolder(index)}>
               <LinearGradient colors={["#D9B24C", "#C9A227", "#8A6D1F"]} style={styles.storyRing}>
                 <View style={styles.storyRingInner}>
-                  {folder.logoUrl ? (
-                    <Image source={{ uri: folder.logoUrl }} style={styles.storyImage} />
-                  ) : (
-                    <View style={styles.storyPlaceholder}>
-                      <Text style={styles.storyPlaceholderText}>{folder.title.slice(0, 2).toUpperCase()}</Text>
-                    </View>
-                  )}
+                  <StoryLogo logoUrl={folder.logoUrl} title={folder.title} />
                 </View>
               </LinearGradient>
               <Text style={styles.storyLabel} numberOfLines={1}>{folder.title}</Text>
@@ -280,14 +290,10 @@ export function NewsScreen() {
                   onPress={() => setActiveNewsItem(item)}
                 >
                   <View style={styles.heroCard}>
-                    {item.mediaUrl ? (
-                      <Image source={{ uri: item.mediaUrl }} style={styles.heroImage} />
-                    ) : (
-                      <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.heroImage} />
-                    )}
+                    <HeroImage mediaUrl={item.mediaUrl} style={isWide ? styles.heroImageWide : styles.heroImage} />
                     <View style={styles.heroTextBlock}>
                       <Text style={styles.heroDate}>{formatDate(item.publishedAt)}</Text>
-                      <Text style={styles.heroTitle} numberOfLines={2}>{item.title}</Text>
+                      <Text style={[styles.heroTitle, isWide ? styles.heroTitleWide : null]} numberOfLines={2}>{item.title}</Text>
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -324,31 +330,46 @@ export function NewsScreen() {
       {news && news.latest.length > 0 ? (
         <View style={styles.section}>
           <SectionTitle title="Ostale vesti" />
-          {news.latest.map((item) => (
-            <TouchableOpacity key={item.id} onPress={() => setActiveNewsItem(item)}>
-              <View style={styles.newsRow}>
-                <View style={styles.newsRowText}>
-                  <Text style={styles.newsTitleCompact} numberOfLines={2}>{item.title}</Text>
-                  <Text style={styles.newsMeta}>{formatDate(item.publishedAt)}</Text>
-                </View>
-                {item.mediaUrl ? <Image source={{ uri: item.mediaUrl }} style={styles.newsRowThumb} /> : <View style={[styles.newsRowThumb, styles.newsRowThumbPlaceholder]} />}
-              </View>
-            </TouchableOpacity>
-          ))}
+          <View style={isWide ? styles.newsGrid : undefined}>
+            {news.latest.map((item) =>
+              isWide ? (
+                <TouchableOpacity key={item.id} style={styles.newsGridItem} onPress={() => setActiveNewsItem(item)}>
+                  <View style={styles.newsCard}>
+                    <NewsThumb mediaUrl={item.mediaUrl} style={styles.newsCardThumb} />
+                    <View style={styles.newsCardText}>
+                      <Text style={styles.newsTitleCompact} numberOfLines={2}>{item.title}</Text>
+                      <Text style={styles.newsMeta}>{formatDate(item.publishedAt)}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity key={item.id} onPress={() => setActiveNewsItem(item)}>
+                  <View style={styles.newsRow}>
+                    <View style={styles.newsRowText}>
+                      <Text style={styles.newsTitleCompact} numberOfLines={2}>{item.title}</Text>
+                      <Text style={styles.newsMeta}>{formatDate(item.publishedAt)}</Text>
+                    </View>
+                    <NewsThumb mediaUrl={item.mediaUrl} style={styles.newsRowThumb} />
+                  </View>
+                </TouchableOpacity>
+              )
+            )}
+          </View>
         </View>
       ) : null}
 
       {sponsor || isAdmin ? (
         <Card style={styles.sponsorCard}>
           <Text style={styles.sponsorEyebrow}>Sponzor najlepseg gola nedelje</Text>
-          {sponsor ? (
-            <View style={styles.sponsorRow}>
-              {sponsor.logoUrl ? <Image source={{ uri: sponsor.logoUrl }} style={styles.sponsorLogo} /> : null}
-              <View style={styles.sponsorTextBlock}>
-                <Text style={styles.sponsorTitle}>{sponsor.title}</Text>
-                {sponsor.subtitle ? <Text style={styles.sponsorSubtitle}>{sponsor.subtitle}</Text> : null}
-              </View>
-            </View>
+          {sponsor?.logoUrl ? (
+            <TouchableOpacity
+              activeOpacity={sponsor.targetUrl ? 0.8 : 1}
+              onPress={() => {
+                if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
+              }}
+            >
+              <SponsorLogo logoUrl={sponsor.logoUrl} isWide={isWide} />
+            </TouchableOpacity>
           ) : (
             <Text style={styles.pollCopy}>Jos nema podesenog sponzora.</Text>
           )}
@@ -363,7 +384,7 @@ export function NewsScreen() {
       {poll ? (
         <Card style={styles.pollCard}>
           {poll.status === "closed" ? (
-            <GoalPollResult poll={poll} />
+            <GoalPollResult poll={poll} isWide={isWide} />
           ) : (
             <SectionTitle
               eyebrow={poll.status === "tiebreak" ? "Nereseno" : "Glasaj"}
@@ -377,7 +398,9 @@ export function NewsScreen() {
           ) : null}
           {(poll.status === "open" ? poll.options : poll.status === "tiebreak" ? topTiedOptions(poll.options) : []).map((option) => (
             <View key={option.id} style={styles.pollOption}>
-              {option.videoUrl ? <InlineVideo uri={option.videoUrl} style={styles.pollOptionVideo} controls /> : null}
+              {option.videoUrl ? (
+                <PollClipVideo uri={option.videoUrl} isWide={isWide} variant="compact" style={styles.pollOptionVideo} />
+              ) : null}
               <View style={styles.pollOptionHead}>
                 <Text style={styles.pollOptionName}>{option.title}</Text>
                 <Text style={styles.pollOptionPercent}>{option.percent}%</Text>
@@ -437,7 +460,22 @@ export function NewsScreen() {
             <Text style={styles.adminActionButtonPrimaryText}>Pokreni novu anketu</Text>
           </TouchableOpacity>
         </Card>
-      ) : null}
+      ) : (
+        <Card style={styles.pollCard}>
+          <View style={styles.pollComingSoonHead}>
+            <SectionTitle eyebrow="Gol nedelje" title="Glasanje uskoro pocinje" />
+            <Pill label="Uskoro" tone="warning" />
+          </View>
+          <View style={styles.pollComingSoonBody}>
+            <View style={styles.pollComingSoonIconWrap}>
+              <Ionicons name="lock-closed" size={18} color={colors.purple} />
+            </View>
+            <Text style={styles.pollComingSoonCopy}>
+              Anketa za najlepsi gol kola uskoro krece - prati ovaj prostor da ne propustis pocetak glasanja.
+            </Text>
+          </View>
+        </Card>
+      )}
     </ScrollView>
 
     {activeStoryFolder !== null ? (
@@ -501,6 +539,94 @@ export function NewsScreen() {
   );
 }
 
+function StoryLogo({ logoUrl, title }: { logoUrl?: string; title: string }) {
+  const [failed, setFailed] = useState(false);
+  if (logoUrl && !failed) {
+    return <Image source={{ uri: logoUrl }} style={styles.storyImage} onError={() => setFailed(true)} />;
+  }
+  return (
+    <View style={styles.storyPlaceholder}>
+      <Text style={styles.storyPlaceholderText}>{title.slice(0, 2).toUpperCase()}</Text>
+    </View>
+  );
+}
+
+function HeroImage({ mediaUrl, style }: { mediaUrl?: string; style: StyleProp<ImageStyle> }) {
+  const [failed, setFailed] = useState(false);
+  if (mediaUrl && !failed) {
+    return <Image source={{ uri: mediaUrl }} style={style} onError={() => setFailed(true)} />;
+  }
+  return <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={style} />;
+}
+
+function NewsThumb({ mediaUrl, style }: { mediaUrl?: string; style: StyleProp<ImageStyle> }) {
+  const [failed, setFailed] = useState(false);
+  if (mediaUrl && !failed) {
+    return <Image source={{ uri: mediaUrl }} style={style} onError={() => setFailed(true)} />;
+  }
+  return <View style={[style, styles.newsRowThumbPlaceholder]} />;
+}
+
+function SponsorLogo({ logoUrl, isWide }: { logoUrl: string; isWide: boolean }) {
+  const [failed, setFailed] = useState(false);
+  // Measuring the real image and sizing the box to its own aspect ratio (instead of a
+  // fixed box with resizeMode="contain", which just letterboxes it) makes the logo fill
+  // its slot naturally. On the wide desktop layout the slot itself is the full card
+  // width - no separate max-width cap there, so the logo actually fills the screen
+  // width instead of just sitting at a modest fixed size.
+  const [ratio, setRatio] = useState(3);
+  useEffect(() => {
+    setFailed(false);
+    Image.getSize(
+      logoUrl,
+      (width, height) => {
+        if (width && height) setRatio(width / height);
+      },
+      () => undefined
+    );
+  }, [logoUrl]);
+  if (failed) return null;
+  const idealHeight = 140;
+  return (
+    <Image
+      source={{ uri: logoUrl }}
+      style={[styles.sponsorLogo, { aspectRatio: ratio }, isWide ? null : { maxWidth: idealHeight * ratio }]}
+      resizeMode="contain"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function PollClipVideo({
+  uri,
+  isWide,
+  variant = "hero",
+  style
+}: {
+  uri: string;
+  isWide: boolean;
+  variant?: "hero" | "compact";
+  style?: StyleProp<ViewStyle>;
+}) {
+  // Goal clips can be portrait (phone-recorded) or landscape (drone/broadcast), in any mix.
+  // Sizing the box to the clip's own measured aspect ratio (via aspectRatio) sounds ideal,
+  // but expo-video's native VideoView doesn't reliably respect RN's aspectRatio style - on
+  // a real device this produced a collapsed, mostly-black column instead of a properly
+  // shaped box. A fixed-size box with contentFit="cover" sidesteps that entirely: the box
+  // shape never depends on the clip's own ratio, so there's no layout to get wrong,
+  // just a fixed banner that crops whatever doesn't fit instead of corrupting the layout.
+  const idealHeight = variant === "hero" ? 320 : 160;
+  const wideHeight = variant === "hero" ? 520 : 360;
+  return (
+    <InlineVideo
+      uri={uri}
+      controls
+      contentFit="cover"
+      style={[style, { width: "100%", height: isWide ? wideHeight : idealHeight }]}
+    />
+  );
+}
+
 function formatDate(value: string): string {
   if (!value) return "";
   const date = new Date(value);
@@ -514,7 +640,7 @@ function topTiedOptions(options: GoalPoll["options"]): GoalPoll["options"] {
   return options.filter((option) => option.votes === topVotes);
 }
 
-function GoalPollResult({ poll }: { poll: GoalPoll }) {
+function GoalPollResult({ poll, isWide }: { poll: GoalPoll; isWide: boolean }) {
   const winner = poll.options.find((option) => option.isWinner) ?? [...poll.options].sort((a, b) => b.percent - a.percent)[0];
   if (!winner) {
     return <SectionTitle eyebrow="Rezultati" title="Anketa je zavrsena" />;
@@ -522,14 +648,14 @@ function GoalPollResult({ poll }: { poll: GoalPoll }) {
   return (
     <View>
       {winner.videoUrl ? (
-        <InlineVideo key={winner.id} uri={winner.videoUrl} style={styles.winnerVideo} controls />
+        <PollClipVideo key={winner.id} uri={winner.videoUrl} isWide={isWide} style={styles.winnerVideo} />
       ) : null}
       <View style={styles.winnerBanner}>
         <View style={styles.winnerTrophy}>
           <Ionicons name="trophy" size={20} color={colors.yellow} />
         </View>
         <View style={styles.winnerTextBlock}>
-          <Text style={styles.winnerEyebrow}>Pobednik gola nedelje</Text>
+          <Text style={styles.winnerEyebrow}>Pobednik najlepseg gola nedelje</Text>
           <Text style={styles.winnerName}>{winner.title}</Text>
           <Text style={styles.winnerMeta}>{winner.votes}/{poll.totalVotes} glasova ({winner.percent}%)</Text>
         </View>
@@ -541,7 +667,9 @@ function GoalPollResult({ poll }: { poll: GoalPoll }) {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   content: { padding: 18, paddingTop: 58, gap: 16, paddingBottom: 40 },
+  contentWide: { paddingHorizontal: 32, paddingTop: 32, gap: 24 },
   brandRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  brandRowWide: { paddingVertical: 8, marginBottom: 4 },
   adminAddNewsButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -554,7 +682,9 @@ const styles = StyleSheet.create({
   adminAddNewsButtonText: { color: "#fff", fontWeight: "700" },
   brandLeft: { flexDirection: "row", alignItems: "center", gap: 10 },
   brandMark: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#141414" },
+  brandMarkWide: { width: 68, height: 68, borderRadius: 34 },
   brandName: { color: colors.ink, fontWeight: "700", fontSize: 14, lineHeight: 16 },
+  brandNameWide: { fontSize: 30, lineHeight: 34 },
   liveChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -564,8 +694,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 12
   },
+  liveChipWide: { paddingVertical: 12, paddingHorizontal: 20, gap: 8 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.live },
   liveChipText: { color: colors.ink, fontWeight: "600", fontSize: 12 },
+  liveChipTextWide: { fontSize: 15 },
   storiesRow: { flexDirection: "row", gap: 14, paddingRight: 8 },
   storyBubble: { alignItems: "center", width: 70 },
   storyRing: { width: 66, height: 66, borderRadius: 33, alignItems: "center", justifyContent: "center", padding: 3 },
@@ -589,7 +721,10 @@ const styles = StyleSheet.create({
   pollCard: { gap: 10 },
   pollCopy: { color: colors.textMuted },
   pollOption: { gap: 6 },
-  pollOptionVideo: { width: "100%", height: 180, borderRadius: 14, backgroundColor: "#000", marginBottom: 2 },
+  // Most goal clips are shot portrait on a phone - sizing the box to that shape (and
+  // never cropping) instead of forcing a wide, short strip avoids both the "goal is
+  // cut off" crop and the "huge empty margins" look a fixed wide box produces.
+  pollOptionVideo: { borderRadius: 14, backgroundColor: "#000", marginBottom: 2 },
   pollOptionHead: { flexDirection: "row", justifyContent: "space-between" },
   pollOptionName: { color: colors.textPrimary, fontWeight: "700" },
   pollOptionPercent: { color: colors.pink, fontWeight: "700" },
@@ -608,13 +743,20 @@ const styles = StyleSheet.create({
   adminActionButtonText: { color: colors.purple, fontWeight: "700", fontSize: 13 },
   adminActionButtonPrimary: { alignItems: "center", paddingVertical: 12, borderRadius: 14, backgroundColor: colors.purple },
   adminActionButtonPrimaryText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  pollComingSoonHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  pollComingSoonBody: { flexDirection: "row", alignItems: "center", gap: 12 },
+  pollComingSoonIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  pollComingSoonCopy: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" },
   sponsorCard: { gap: 10 },
   sponsorEyebrow: { color: colors.textMuted, fontWeight: "700", fontSize: 11, textTransform: "uppercase" },
-  sponsorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  sponsorLogo: { width: 48, height: 48, borderRadius: 12 },
-  sponsorTextBlock: { flex: 1, gap: 2 },
-  sponsorTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
-  sponsorSubtitle: { color: colors.textMuted, fontSize: 12 },
+  sponsorLogo: { width: "100%", alignSelf: "center" },
   carouselWrap: {
     borderRadius: 26,
     overflow: "hidden",
@@ -650,10 +792,12 @@ const styles = StyleSheet.create({
   dotActive: { width: 20, backgroundColor: "#fff" },
   heroCard: { backgroundColor: "#141414" },
   heroImage: { width: "100%", height: 190 },
+  heroImageWide: { width: "100%", height: 440 },
   heroTextBlock: { padding: 16, gap: 6 },
   heroDate: { color: colors.aqua, fontWeight: "700", fontSize: 12 },
   heroTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
-  winnerVideo: { width: "100%", height: 200, borderRadius: 16, marginBottom: 10, backgroundColor: "#000" },
+  heroTitleWide: { fontSize: 32 },
+  winnerVideo: { borderRadius: 16, marginBottom: 10, backgroundColor: "#000" },
   winnerBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -688,5 +832,16 @@ const styles = StyleSheet.create({
   newsTitleCompact: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
   newsMeta: { color: colors.textMuted, fontSize: 12 },
   newsRowThumb: { width: 64, height: 64, borderRadius: 12 },
-  newsRowThumbPlaceholder: { backgroundColor: colors.surfaceMuted }
+  newsRowThumbPlaceholder: { backgroundColor: colors.surfaceMuted },
+  newsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 18 },
+  newsGridItem: { width: 330 },
+  newsCard: {
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    overflow: "hidden"
+  },
+  newsCardThumb: { width: "100%", height: 170 },
+  newsCardText: { padding: 14, gap: 6 }
 });

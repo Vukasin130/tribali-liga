@@ -3,6 +3,7 @@ import { Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity
 import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../theme/colors";
 import { kitGradientForTeam } from "./PitchPlayerCard";
+import { AvailabilityDot } from "./AvailabilityDot";
 import type { FantasySeasonPoolPlayer } from "../api/types";
 
 export function PlayerPickerSheet({
@@ -85,51 +86,71 @@ export function PlayerPickerSheet({
 
           <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
             {filtered.length === 0 ? <Text style={styles.empty}>Nema dostupnih igraca.</Text> : null}
-            {filtered.map((player) => {
-              const move = Number((player.currentPrice - player.basePrice).toFixed(1));
-              return (
-                <TouchableOpacity key={player.id} style={styles.row} onPress={() => onSelect(player)} activeOpacity={0.75}>
-                  <TouchableOpacity
-                    onPress={() => onViewProfile?.(player)}
-                    disabled={!onViewProfile}
-                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                  >
-                    {player.avatarUrl ? (
-                      <View style={styles.face}>
-                        <Image source={{ uri: player.avatarUrl }} style={styles.faceImage} resizeMode="cover" />
-                      </View>
-                    ) : (
-                      <LinearGradient
-                        colors={kitGradientForTeam(player.teamId)}
-                        start={{ x: 0.15, y: 0 }}
-                        end={{ x: 0.85, y: 1 }}
-                        style={styles.face}
-                      >
-                        <View style={styles.faceHead} />
-                      </LinearGradient>
-                    )}
-                  </TouchableOpacity>
-                  <View style={styles.rowInfo}>
-                    <Text style={styles.rowName} numberOfLines={1}>{player.displayName}</Text>
-                    <Text style={styles.rowMeta} numberOfLines={1}>
-                      {player.currentPrice.toFixed(1)} CR - {player.teamName}
-                    </Text>
-                    {player.competitionName ? <Text style={styles.rowLeague} numberOfLines={1}>{player.competitionName}</Text> : null}
-                  </View>
-                  {move !== 0 ? (
-                    <View style={[styles.moveBox, move > 0 ? styles.moveBoxUp : styles.moveBoxDown]}>
-                      <Text style={[styles.moveText, move > 0 ? styles.moveUp : styles.moveDown]}>
-                        {move > 0 ? "+" : ""}{move.toFixed(1)}
-                      </Text>
-                    </View>
-                  ) : null}
-                </TouchableOpacity>
-              );
-            })}
+            {filtered.map((player) => (
+              <PickerRow key={player.id} player={player} onSelect={onSelect} onViewProfile={onViewProfile} />
+            ))}
           </ScrollView>
         </View>
       </View>
     </Modal>
+  );
+}
+
+function PickerRow({
+  player,
+  onSelect,
+  onViewProfile
+}: {
+  player: FantasySeasonPoolPlayer;
+  onSelect: (player: FantasySeasonPoolPlayer) => void;
+  onViewProfile?: (player: FantasySeasonPoolPlayer) => void;
+}) {
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const move = Number((player.currentPrice - player.basePrice).toFixed(1));
+
+  return (
+    <TouchableOpacity style={styles.row} onPress={() => onSelect(player)} activeOpacity={0.75}>
+      <TouchableOpacity
+        onPress={() => onViewProfile?.(player)}
+        disabled={!onViewProfile}
+        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+      >
+        {player.avatarUrl && !photoFailed ? (
+          <View style={styles.face}>
+            <Image
+              source={{ uri: player.avatarUrl }}
+              style={styles.faceImage}
+              resizeMode="cover"
+              onError={() => setPhotoFailed(true)}
+            />
+          </View>
+        ) : (
+          <LinearGradient
+            colors={kitGradientForTeam(player.teamId)}
+            start={{ x: 0.15, y: 0 }}
+            end={{ x: 0.85, y: 1 }}
+            style={styles.face}
+          >
+            <View style={styles.faceHead} />
+          </LinearGradient>
+        )}
+        <AvailabilityDot status={player.matchAvailability} />
+      </TouchableOpacity>
+      <View style={styles.rowInfo}>
+        <Text style={styles.rowName} numberOfLines={1}>{player.displayName}</Text>
+        <Text style={styles.rowMeta} numberOfLines={1}>
+          {player.currentPrice.toFixed(1)} CR - {player.teamName}
+        </Text>
+        {player.competitionName ? <Text style={styles.rowLeague} numberOfLines={1}>{player.competitionName}</Text> : null}
+      </View>
+      {move !== 0 ? (
+        <View style={[styles.moveBox, move > 0 ? styles.moveBoxUp : styles.moveBoxDown]}>
+          <Text style={[styles.moveText, move > 0 ? styles.moveUp : styles.moveDown]}>
+            {move > 0 ? "+" : ""}{move.toFixed(1)}
+          </Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 

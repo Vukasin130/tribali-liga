@@ -1,19 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { fetchAllTeams, fetchLeaders, fetchPlayers } from "../api/endpoints";
-import type { LeaderEntry, Player, Team } from "../api/types";
+import { useQuery } from "@tanstack/react-query";
+import { fetchClubs, fetchCompetitionStandings, fetchLeaders, fetchPlayers } from "../api/endpoints";
+import type { Club, LeaderEntry, Player, StandingGroup } from "../api/types";
 import { EmptyState, ErrorState, LoadingState, Pill } from "../components/ui";
+import { StandingsTable } from "../components/StandingsTable";
 import { colors } from "../theme/colors";
 import { useCompetition } from "../state/CompetitionContext";
 import { TeamProfileModal } from "./TeamProfileModal";
 import { PlayerProfileModal } from "./PlayerProfileModal";
+import { SponsorStrip } from "../components/SponsorStrip";
+import { TeamCrest } from "../components/TeamCrest";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
 type Section = "home" | "players" | "teams" | "stats";
-type StatCategory = "goals" | "assists" | "saves" | "mvp";
+type StatCategory = "table" | "goals" | "assists" | "saves" | "mvp";
 
 const STAT_TABS: { key: StatCategory; label: string }[] = [
+  { key: "table", label: "Tabela" },
   { key: "goals", label: "Golovi" },
   { key: "assists", label: "Asist." },
   { key: "saves", label: "Odbrane" },
@@ -25,15 +31,11 @@ export function ExploreScreen() {
   // league for stats is kept local to this screen so picking one here doesn't change what
   // Seasons/Profile/etc. show elsewhere in the app.
   const { competitions } = useCompetition();
+  const isWide = useIsWideScreen();
   const [section, setSection] = useState<Section>("home");
   const [search, setSearch] = useState("");
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
-  const [statCategory, setStatCategory] = useState<StatCategory>("goals");
+  const [statCategory, setStatCategory] = useState<StatCategory>("table");
   const [statsCompetitionId, setStatsCompetitionId] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
 
@@ -43,51 +45,68 @@ export function ExploreScreen() {
     setStatsCompetitionId(richest?.id || competitions[0].id);
   }, [competitions, statsCompetitionId]);
 
-  useEffect(() => {
-    // Igraci/Ekipe show the complete historical database - no league/season selection needed.
-    if (section === "players") {
-      setLoading(true);
-      setError("");
-      fetchPlayers()
-        .then(setPlayers)
-        .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam igrace."))
-        .finally(() => setLoading(false));
-    }
-    if (section === "teams") {
-      setLoading(true);
-      setError("");
-      fetchAllTeams()
-        .then(setTeams)
-        .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam ekipe."))
-        .finally(() => setLoading(false));
-    }
-  }, [section]);
+  // Igraci/Ekipe show the complete historical database - no league/season selection needed.
+  const playersQuery = useQuery({
+    queryKey: ["players"],
+    queryFn: () => fetchPlayers(),
+    enabled: section === "players"
+  });
+  const clubsQuery = useQuery({
+    queryKey: ["clubs"],
+    queryFn: () => fetchClubs(),
+    enabled: section === "teams"
+  });
+  const leadersQuery = useQuery({
+    queryKey: ["leaders", statsCompetitionId, statCategory],
+    queryFn: () => fetchLeaders(statsCompetitionId, statCategory as "goals" | "assists" | "saves" | "mvp"),
+    enabled: section === "stats" && statCategory !== "table" && Boolean(statsCompetitionId)
+  });
+  const standingsQuery = useQuery({
+    queryKey: ["standings", statsCompetitionId],
+    queryFn: () => fetchCompetitionStandings(statsCompetitionId),
+    enabled: section === "stats" && statCategory === "table" && Boolean(statsCompetitionId)
+  });
 
-  useEffect(() => {
-    if (section !== "stats" || !statsCompetitionId) return;
-    setLoading(true);
-    setError("");
-    fetchLeaders(statsCompetitionId, statCategory)
-      .then((res) => setLeaders(res.leaders))
-      .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam statistiku."))
-      .finally(() => setLoading(false));
-  }, [section, statsCompetitionId, statCategory]);
+  const players: Player[] = playersQuery.data ?? [];
+  const clubs: Club[] = clubsQuery.data ?? [];
+  const leaders: LeaderEntry[] = leadersQuery.data?.leaders ?? [];
+  const standings: StandingGroup[] = standingsQuery.data ?? [];
+
+  const loading =
+    (section === "players" && playersQuery.isLoading) ||
+    (section === "teams" && clubsQuery.isLoading) ||
+    (section === "stats" && statCategory === "table" && standingsQuery.isLoading) ||
+    (section === "stats" && statCategory !== "table" && leadersQuery.isLoading);
+
+  const activeError =
+    section === "players"
+      ? playersQuery.error
+      : section === "teams"
+        ? clubsQuery.error
+        : section === "stats"
+          ? (statCategory === "table" ? standingsQuery.error : leadersQuery.error)
+          : null;
+  const fallbackErrorMessage =
+    section === "players" ? "Ne mogu da ucitam igrace." : section === "teams" ? "Ne mogu da ucitam ekipe." : "Ne mogu da ucitam statistiku.";
+  const error = activeError ? (activeError instanceof Error ? activeError.message : fallbackErrorMessage) : "";
 
   const filteredPlayers = useMemo(() => {
     if (!search.trim()) return players;
     const q = search.trim().toLowerCase();
-    return players.filter((p) => p.displayName.toLowerCase().includes(q) || p.teamName.toLowerCase().includes(q));
+    return players.filter(
+      (p) => p.displayName.toLowerCase().includes(q) || p.teams.some((t) => t.teamName.toLowerCase().includes(q))
+    );
   }, [players, search]);
 
-  const filteredTeams = useMemo(() => {
-    if (!search.trim()) return teams;
+  const filteredClubs = useMemo(() => {
+    if (!search.trim()) return clubs;
     const q = search.trim().toLowerCase();
-    return teams.filter((t) => t.name.toLowerCase().includes(q));
-  }, [teams, search]);
+    return clubs.filter((c) => c.name.toLowerCase().includes(q));
+  }, [clubs, search]);
 
   if (section === "home") {
     return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.homeContent}>
+      <ScrollView style={styles.screen} contentContainerStyle={[styles.homeContent, isWide ? styles.homeContentWide : null]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Explore</Text>
           <Text style={styles.headerSubtitle}>Izaberi sta trazis, pa otvori detaljnu pretragu.</Text>
@@ -116,6 +135,8 @@ export function ExploreScreen() {
             <Text style={styles.actionCardText}>Najbolji strelci, asistenti, golmani i MVP igraci lige.</Text>
           </LinearGradient>
         </TouchableOpacity>
+
+        <SponsorStrip />
       </ScrollView>
     );
   }
@@ -145,7 +166,7 @@ export function ExploreScreen() {
       ) : (
         <>
           {competitions.length > 1 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.leagueRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.leagueScroll} contentContainerStyle={styles.leagueRow}>
               {competitions.map((competition) => (
                 <TouchableOpacity
                   key={competition.id}
@@ -180,60 +201,113 @@ export function ExploreScreen() {
       {error ? <ErrorState message={error} /> : null}
 
       {!loading && section === "players" ? (
-        <ScrollView contentContainerStyle={styles.listContent}>
+        <ScrollView contentContainerStyle={[styles.listContent, isWide ? styles.listContentWide : null]}>
           {filteredPlayers.length === 0 ? <EmptyState message="Nema rezultata." /> : null}
-          {filteredPlayers.map((player, index) => (
-            <TouchableOpacity key={player.id} style={styles.searchRow} onPress={() => setActivePlayerId(player.id)}>
-              <Text style={styles.searchRank}>{index + 1}</Text>
-              <View style={styles.searchAvatar}>
-                <Text style={styles.searchAvatarText}>{initials(player.displayName)}</Text>
-              </View>
-              <View style={styles.searchInfo}>
-                <Text style={styles.searchName}>{player.displayName}</Text>
-                <Text style={styles.searchMeta}>{player.teamName} - {player.position || "igrac"}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+          <View style={isWide ? styles.searchGrid : undefined}>
+            {filteredPlayers.map((player, index) => (
+              <TouchableOpacity
+                key={player.id}
+                style={[styles.searchRow, isWide ? styles.searchRowWide : null]}
+                onPress={() => setActivePlayerId(player.id)}
+              >
+                <Text style={styles.searchRank}>{index + 1}</Text>
+                <PlayerAvatar photoUrl={player.avatarUrl} name={player.displayName} />
+                <View style={styles.searchInfo}>
+                  <Text style={styles.searchName}>{player.displayName}</Text>
+                  <Text style={styles.searchMeta}>
+                    {player.teams[0]?.teamName || "bez ekipe"} - {player.position || "igrac"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         </ScrollView>
       ) : null}
 
       {!loading && section === "teams" ? (
-        <ScrollView contentContainerStyle={styles.listContent}>
-          {filteredTeams.length === 0 ? <EmptyState message="Nema rezultata." /> : null}
-          {filteredTeams.map((team) => (
-            <TouchableOpacity key={team.id} style={styles.searchRow} onPress={() => setActiveTeamId(team.id)}>
-              <View style={[styles.searchAvatar, styles.searchAvatarSquare]}>
-                <Text style={styles.searchAvatarText}>{initials(team.name)}</Text>
-              </View>
-              <View style={styles.searchInfo}>
-                <Text style={styles.searchName}>{team.name}</Text>
-                {team.playersCount !== undefined ? <Text style={styles.searchMeta}>{team.playersCount} igraca</Text> : null}
-              </View>
-            </TouchableOpacity>
-          ))}
+        <ScrollView contentContainerStyle={[styles.listContent, isWide ? styles.listContentWide : null]}>
+          {filteredClubs.length === 0 ? <EmptyState message="Nema rezultata." /> : null}
+          <View style={isWide ? styles.searchGrid : undefined}>
+            {filteredClubs.map((club) => (
+              <TouchableOpacity
+                key={club.id}
+                style={[styles.searchRow, isWide ? styles.searchRowWide : null]}
+                onPress={() => setActiveTeamId(club.teams[0]?.teamId ?? null)}
+                disabled={club.teams.length === 0}
+              >
+                <TeamCrest teamId={club.id} name={club.name} logoUrl={club.logoUrl} size={46} />
+                <View style={styles.searchInfo}>
+                  <Text style={styles.searchName}>{club.name}</Text>
+                  <Text style={styles.searchMeta}>
+                    {club.activePlayersCount} {club.activePlayersCount === 1 ? "igrac" : "igraca"}
+                    {club.competitionsCount > 1 ? ` - ${club.competitionsCount} liga` : ""}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         </ScrollView>
       ) : null}
 
-      {!loading && section === "stats" ? (
-        <ScrollView contentContainerStyle={styles.listContent}>
+      {!loading && section === "stats" && statCategory === "table" ? (
+        <ScrollView contentContainerStyle={[styles.listContent, isWide ? styles.listContentWide : null]}>
+          {standings.length === 0 ? <EmptyState message="Tabela jos nije dostupna." /> : null}
+          <View style={isWide ? styles.standingsGridWide : undefined}>
+            {standings.map((group) => (
+              <View key={group.name} style={isWide ? styles.standingsGridItem : undefined}>
+                <StandingsTable groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      ) : null}
+
+      {!loading && section === "stats" && statCategory !== "table" ? (
+        <ScrollView contentContainerStyle={[styles.listContent, isWide ? styles.listContentWide : null]}>
           {leaders.length === 0 ? <EmptyState message="Nema podataka za ovu kategoriju." /> : null}
-          {leaders.map((leader) => (
-            <TouchableOpacity key={leader.playerId} style={styles.leaderRow} onPress={() => setActivePlayerId(leader.playerId)}>
-              <View style={styles.leaderMedal}>
-                <Text style={styles.leaderMedalText}>{leader.rank}</Text>
-              </View>
-              <View style={styles.searchInfo}>
-                <Text style={styles.searchName}>{leader.playerName}</Text>
-                <Text style={styles.searchMeta}>{leader.teamName}</Text>
-              </View>
-              <Pill label={String(leader.value)} tone="success" />
-            </TouchableOpacity>
-          ))}
+          <View style={isWide ? styles.searchGrid : undefined}>
+            {leaders.map((leader) => (
+              <TouchableOpacity
+                key={leader.playerId}
+                style={[styles.leaderRow, isWide ? styles.searchRowWide : null]}
+                onPress={() => setActivePlayerId(leader.playerId)}
+              >
+                <View style={styles.leaderMedal}>
+                  <Text style={styles.leaderMedalText}>{leader.rank}</Text>
+                </View>
+                <View style={styles.searchInfo}>
+                  <Text style={styles.searchName}>{leader.playerName}</Text>
+                  <Text style={styles.searchMeta}>{leader.teamName}</Text>
+                </View>
+                <Pill label={String(leader.value)} tone="success" />
+              </TouchableOpacity>
+            ))}
+          </View>
         </ScrollView>
       ) : null}
 
       {activeTeamId ? <TeamProfileModal teamId={activeTeamId} onClose={() => setActiveTeamId(null)} /> : null}
       {activePlayerId ? <PlayerProfileModal playerId={activePlayerId} onClose={() => setActivePlayerId(null)} /> : null}
+    </View>
+  );
+}
+
+function PlayerAvatar({ photoUrl, name, size = 46 }: { photoUrl?: string; name: string; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  const shape = { width: size, height: size, borderRadius: size / 2 };
+  if (photoUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: photoUrl }}
+        style={[styles.searchAvatarPhoto, shape]}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <View style={[styles.searchAvatar, shape]}>
+      <Text style={styles.searchAvatarText}>{initials(name)}</Text>
     </View>
   );
 }
@@ -250,11 +324,23 @@ function initials(name: string): string {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   homeContent: { padding: 18, paddingTop: 60, gap: 16, paddingBottom: 40 },
+  homeContentWide: { paddingHorizontal: 32, gap: 24 },
   header: { gap: 4 },
   headerTitle: { color: colors.ink, fontSize: 32, fontWeight: "700" },
   headerSubtitle: { color: colors.textMuted, fontSize: 14 },
-  leagueRow: { flexDirection: "row", gap: 8, paddingRight: 8, marginHorizontal: 18, marginTop: 14 },
+  leagueScroll: { flexGrow: 0, flexShrink: 0, maxHeight: 48, marginTop: 14 },
+  leagueRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    paddingRight: 8,
+    marginHorizontal: 18
+  },
   leagueChip: {
+    flexShrink: 0,
+    flexGrow: 0,
+    alignSelf: "flex-start",
+    maxWidth: 220,
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 999,
@@ -263,7 +349,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line
   },
   leagueChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
-  leagueChipText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
+  leagueChipText: { flexShrink: 1, color: colors.textMuted, fontWeight: "700", fontSize: 12 },
   leagueChipTextActive: { color: "#fff" },
   actionGrid: { flexDirection: "row", gap: 12 },
   actionCardWrap: { flex: 1 },
@@ -292,6 +378,10 @@ const styles = StyleSheet.create({
   statTabText: { color: colors.textMuted, fontWeight: "600", fontSize: 12 },
   statTabTextActive: { color: "#fff" },
   listContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 40, gap: 4 },
+  listContentWide: { paddingHorizontal: 32, paddingTop: 20 },
+  searchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  standingsGridWide: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  standingsGridItem: { width: 480 },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -300,8 +390,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.line
   },
+  searchRowWide: {
+    width: 360,
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderBottomWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14
+  },
   searchRank: { width: 20, color: colors.textMuted, fontWeight: "700", fontSize: 12 },
   searchAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: colors.purple, alignItems: "center", justifyContent: "center" },
+  searchAvatarPhoto: { backgroundColor: "rgba(20,20,20,0.06)" },
   searchAvatarSquare: { borderRadius: 12, backgroundColor: colors.aqua },
   searchAvatarText: { color: "#fff", fontWeight: "700" },
   searchInfo: { flex: 1 },

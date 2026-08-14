@@ -162,6 +162,11 @@ export interface MatchSummary {
   awayTeamLogoUrl: string;
   homeScore: number;
   awayScore: number;
+  period: string;
+  periodStartedAt: string;
+  halfLengthMinutes: number;
+  sponsorId?: string;
+  sponsor: Sponsor | null;
 }
 
 export interface MatchLineupEntry {
@@ -172,6 +177,7 @@ export interface MatchLineupEntry {
   playerId: string;
   playerName: string;
   position: string;
+  avatarUrl: string;
   isStarter: boolean;
   isGoalkeeper: boolean;
   shirtNumber: number | null;
@@ -190,6 +196,7 @@ export interface MatchEventDetail {
   scoreHome: number;
   scoreAway: number;
   text: string | null;
+  fantasyPointsDelta: number;
 }
 
 export interface MatchPlayerStat {
@@ -209,6 +216,14 @@ export interface MatchPlayerStat {
   fantasyPoints: number;
 }
 
+export interface MediaLink {
+  id: string;
+  matchId: string;
+  kind: string;
+  label: string;
+  url: string;
+}
+
 export interface MatchPredictions {
   home: number;
   draw: number;
@@ -224,6 +239,7 @@ export interface MatchDetail extends MatchSummary {
   lineups: MatchLineupEntry[];
   events: MatchEventDetail[];
   playerStats: MatchPlayerStat[];
+  media: MediaLink[];
   predictions: MatchPredictions;
 }
 
@@ -288,6 +304,16 @@ export interface LeaderboardEntry {
   lastScoredAt: string | null;
 }
 
+export interface FantasyMiniLeague {
+  id: string;
+  fantasySeasonId: string;
+  name: string;
+  inviteCode: string;
+  memberCount: number;
+  isCreator: boolean;
+  createdAt: string;
+}
+
 export interface Gameweek {
   id: string;
   competitionId: string;
@@ -346,6 +372,19 @@ export interface FantasySeasonPoolPlayer {
   currentPrice: number;
   isAvailable: boolean;
   availabilityNote: string;
+  isPriceLocked: boolean;
+  matchAvailability: "unknown" | "playing" | "not_playing";
+}
+
+export interface MatchAvailabilityRequest {
+  id: string;
+  matchId: string;
+  playerId: string;
+  status: "unknown" | "playing" | "not_playing";
+  respondedAt: string | null;
+  scheduledAt: string;
+  homeTeamName: string;
+  awayTeamName: string;
 }
 
 export interface FantasySeasonPick {
@@ -383,6 +422,7 @@ export interface FantasySeasonTeam {
   name: string;
   totalPoints: number;
   lastScoredAt: string | null;
+  budgetCap: number;
   budgetSpent: number;
   budgetRemaining: number;
   picks: FantasySeasonPick[];
@@ -453,6 +493,7 @@ export interface GoalPoll {
 export interface Team {
   id: string;
   competitionId: string;
+  clubId?: string;
   name: string;
   shortName: string;
   logoUrl?: string;
@@ -461,17 +502,35 @@ export interface Team {
   playersCount?: number;
 }
 
-export interface Player {
+export interface Club {
   id: string;
+  name: string;
+  shortName: string;
+  logoUrl: string;
+  teamsCount: number;
+  competitionsCount: number;
+  activePlayersCount: number;
+  teams: PlayerTeamRef[];
+}
+
+export interface PlayerTeamRef {
   teamId: string;
   teamName: string;
   teamShortName: string;
   competitionId: string;
+  competitionName: string;
+  seasonName: string;
+}
+
+export interface Player {
+  id: string;
+  clubId: string;
   displayName: string;
   position: string;
   shirtNumber: number | null;
   avatarUrl: string;
   isActive: boolean;
+  teams: PlayerTeamRef[];
 }
 
 export interface LeaderEntry {
@@ -496,6 +555,10 @@ export interface LeadersResponse {
 export interface VerificationRequest {
   id: string;
   createdAt: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string;
   cityId: string;
   cityName: string;
   teamId: string;
@@ -532,6 +595,7 @@ export interface TeamProfile {
   matches: MatchSummary[];
   totals: { goals: number; assists: number; saves: number; fantasy_points: number };
   nextMatch: PlayerNextMatch | null;
+  teams: PlayerTeamRef[];
 }
 
 export interface PlayerSeasonStat {
@@ -573,14 +637,12 @@ export interface PlayerNextMatch {
 
 export interface PlayerProfile {
   id: string;
+  clubId: string;
   displayName: string;
   position: string;
   shirtNumber: number | null;
   avatarUrl: string;
-  teamId: string;
-  teamName: string;
-  teamShortName: string;
-  competition: { id: string; name: string; seasonName: string };
+  teams: PlayerTeamRef[];
   seasonStats: PlayerSeasonStat[];
   matchStats: PlayerMatchStat[];
   nextMatch: PlayerNextMatch | null;
@@ -592,4 +654,68 @@ export interface Sponsor {
   subtitle: string;
   logoUrl: string;
   targetUrl: string;
+  isActive?: boolean;
+}
+
+export interface AnalyticsDailyCount {
+  day: string;
+  count: number;
+}
+
+export interface AnalyticsEngagementMetric {
+  total: number;
+  last7Days: number;
+}
+
+export interface AnalyticsOverview {
+  users: {
+    total: number;
+    fans: number;
+    verifiedPlayers: number;
+    admins: number;
+    newLast7Days: number;
+    newLast30Days: number;
+  };
+  registrationsPerDay: AnalyticsDailyCount[];
+  activityPerDay: AnalyticsDailyCount[];
+  fantasy: {
+    totalTeams: number;
+    newLast30Days: number;
+  };
+  engagement: {
+    storyViews: AnalyticsEngagementMetric;
+    storyLikes: AnalyticsEngagementMetric;
+    goalVotes: AnalyticsEngagementMetric;
+    matchPredictions: AnalyticsEngagementMetric;
+  };
+  content: {
+    newsTotal: number;
+    newsPublished: number;
+    storiesTotal: number;
+    goalPollsTotal: number;
+  };
+  verification: {
+    none: number;
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+  adminActivity: {
+    last7Days: number;
+    last30Days: number;
+  };
+  miniLeagues: {
+    total: number;
+    newLast30Days: number;
+    totalMemberships: number;
+    list: Array<{
+      id: string;
+      name: string;
+      inviteCode: string;
+      createdAt: string;
+      seasonName: string;
+      creatorName: string;
+      memberCount: number;
+    }>;
+  };
 }

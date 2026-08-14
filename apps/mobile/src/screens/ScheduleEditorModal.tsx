@@ -3,6 +3,8 @@ import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 import { updateMatch } from "../api/endpoints";
 import type { GeneratedMatch } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { Card } from "../components/ui";
 
 function pad(value: number): string {
@@ -38,6 +40,7 @@ export function ScheduleEditorModal({
 }) {
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
   const [drafts, setDrafts] = useState<Record<string, Draft>>(() => {
     const initial: Record<string, Draft> = {};
     matches.forEach((match) => {
@@ -87,7 +90,7 @@ export function ScheduleEditorModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Raspored po kolima</Text>
           <Text style={styles.hint}>
             Aplikacija je vec izracunala ko sa kim igra u svakom kolu. Svaka utakmica ima svoj dan i vreme - ne moraju sve utakmice istog kola da budu istog dana.

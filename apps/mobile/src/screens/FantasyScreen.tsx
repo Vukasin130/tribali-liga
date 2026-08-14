@@ -1,39 +1,59 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 import {
   fetchFantasySeason,
   fetchFantasySeasonLeaderboard,
   fetchFantasySeasonPlayerPool,
   fetchFantasySeasonTeam,
   listFantasySeasons,
+  listMyFantasyMiniLeagues,
   saveFantasySeasonPicks,
-  scoreFantasySeasonGameweek,
+  setFantasyPoolPlayerAvailability,
+  setFantasyPoolPlayerPrice,
   syncFantasySeasonPool,
-  updateFantasyGameweek,
   updateFantasySeason
 } from "../api/endpoints";
-import type { FantasyGameweek, FantasySeason, FantasySeasonPoolPlayer, FantasySeasonTeam, LeaderboardEntry } from "../api/types";
+import type {
+  FantasyGameweek,
+  FantasyMiniLeague,
+  FantasySeason,
+  FantasySeasonPoolPlayer,
+  FantasySeasonTeam,
+  LeaderboardEntry
+} from "../api/types";
+import { MiniLeagueModal } from "./MiniLeagueModal";
+import { MiniLeagueDetailModal } from "./MiniLeagueDetailModal";
 import { ApiError } from "../api/client";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton, SectionTitle } from "../components/ui";
-import { colors } from "../theme/colors";
+import { LeaderboardRow } from "../components/LeaderboardRow";
+import { colors, gradients } from "../theme/colors";
 import { useAuth } from "../state/AuthContext";
 import { PlayerProfileModal } from "./PlayerProfileModal";
 import { FantasySeasonComposerModal } from "./FantasySeasonComposerModal";
-import { FantasyGameweekComposerModal } from "./FantasyGameweekComposerModal";
 import { Pitch } from "../components/Pitch";
 import { BenchStrip } from "../components/BenchStrip";
 import { PlayerPickerSheet } from "../components/PlayerPickerSheet";
 import { kitColorForTeam } from "../components/PitchPlayerCard";
+import { SponsorStrip } from "../components/SponsorStrip";
+import { AvailabilityDot } from "../components/AvailabilityDot";
 import { BENCH_SLOTS, POSITION_GROUP_LABELS, SLOT_LABELS, SLOT_POSITION, STARTER_SLOTS, positionGroupOf } from "../fantasyConstants";
 import { ManagerTeamModal } from "./ManagerTeamModal";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
 const SEASON_STATUSES = ["draft", "active", "finished"];
-const GAMEWEEK_STATUSES = ["draft", "open", "locked", "scoring", "finished"];
 
-const BUDGET_CAP = 100;
+const DEFAULT_BUDGET_CAP = 100;
 
 type Tab = "team" | "pool" | "leaderboard" | "admin";
+
+function tabLabel(value: Tab): string {
+  if (value === "team") return "Moj tim";
+  if (value === "pool") return "Igraci";
+  if (value === "leaderboard") return "Tabela";
+  return "Admin";
+}
 
 interface SelectedPick {
   player: FantasySeasonPoolPlayer;
@@ -44,6 +64,7 @@ interface SelectedPick {
 export function FantasyScreen() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isWide = useIsWideScreen();
   const [tab, setTab] = useState<Tab>("team");
 
   const [season, setSeason] = useState<Required<FantasySeason> | null>(null);
@@ -53,6 +74,9 @@ export function FantasyScreen() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<string>("season");
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [myMiniLeagues, setMyMiniLeagues] = useState<FantasyMiniLeague[]>([]);
+  const [miniLeagueModal, setMiniLeagueModal] = useState<"create" | "join" | null>(null);
+  const [viewingMiniLeagueId, setViewingMiniLeagueId] = useState<string | null>(null);
   const [viewingTeam, setViewingTeam] = useState<{ fantasyTeamId: string; gameweekId?: string; managerName: string } | null>(null);
   const [selected, setSelected] = useState<SelectedPick[]>([]);
   const [search, setSearch] = useState("");
@@ -70,11 +94,14 @@ export function FantasyScreen() {
   const [selectedSeasonId, setSelectedSeasonId] = useState("");
   const [showSeasonComposer, setShowSeasonComposer] = useState(false);
   const [editSeasonComposer, setEditSeasonComposer] = useState(false);
-  const [showGameweekComposer, setShowGameweekComposer] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
-  const [gwBusyId, setGwBusyId] = useState("");
   const [adminError, setAdminError] = useState("");
+  const [editingPriceId, setEditingPriceId] = useState("");
+  const [priceDraft, setPriceDraft] = useState("");
+  const [priceSaving, setPriceSaving] = useState(false);
+  const [showAllPool, setShowAllPool] = useState(false);
+  const [availabilitySavingId, setAvailabilitySavingId] = useState("");
 
   const load = useCallback(async () => {
     setError("");
@@ -103,9 +130,13 @@ export function FantasyScreen() {
       setGameweek(activeGameweek);
 
       const [teamData, poolData] = await Promise.all([
-        // Admin accounts don't play fantasy - skip fetching (and thereby auto-creating) a team for them.
-        isAdmin ? Promise.resolve(null) : fetchFantasySeasonTeam(seasonData.id, activeGameweek?.id).catch(() => null),
-        fetchFantasySeasonPlayerPool(seasonData.id)
+        // Admin also gets a "Moj tim" tab (a personal test/preview team) so they
+        // can see the pitch-builder experience themselves, not just via a fan's phone.
+        fetchFantasySeasonTeam(seasonData.id, activeGameweek?.id).catch(() => null),
+        // Admin always gets the full pool (accepted + excluded) so the status
+        // checklist and the "prikazi iskljucene" toggle both work off one
+        // already-loaded list instead of a round-trip per toggle.
+        fetchFantasySeasonPlayerPool(seasonData.id, undefined, !isAdmin)
       ]);
 
       setTeam(teamData);
@@ -142,11 +173,6 @@ export function FantasyScreen() {
   }, [load]);
 
   useEffect(() => {
-    // Admins don't have a "Moj tim" tab - land them somewhere that exists.
-    if (isAdmin) setTab((current) => (current === "team" ? "pool" : current));
-  }, [isAdmin]);
-
-  useEffect(() => {
     if (!season) {
       setLeaderboard([]);
       return;
@@ -158,6 +184,30 @@ export function FantasyScreen() {
       .catch(() => setLeaderboard([]))
       .finally(() => setLeaderboardLoading(false));
   }, [season, leaderboardScope]);
+
+  const loadMyMiniLeagues = useCallback(() => {
+    if (!season) {
+      setMyMiniLeagues([]);
+      return;
+    }
+    listMyFantasyMiniLeagues(season.id)
+      .then(setMyMiniLeagues)
+      .catch(() => setMyMiniLeagues([]));
+  }, [season]);
+
+  useEffect(() => {
+    loadMyMiniLeagues();
+  }, [loadMyMiniLeagues]);
+
+  function handleMiniLeagueSaved(openId?: string) {
+    setMiniLeagueModal(null);
+    loadMyMiniLeagues();
+    if (openId) setViewingMiniLeagueId(openId);
+  }
+
+  function handleMiniLeagueChanged() {
+    loadMyMiniLeagues();
+  }
 
   async function handleSyncPool() {
     if (!season) return;
@@ -174,6 +224,57 @@ export function FantasyScreen() {
     }
   }
 
+  function startEditPrice(player: FantasySeasonPoolPlayer) {
+    setEditingPriceId(player.playerId);
+    setPriceDraft(player.currentPrice.toFixed(1));
+  }
+
+  async function handleSavePrice(playerId: string) {
+    if (!season) return;
+    const price = Number(priceDraft.replace(",", "."));
+    if (!Number.isFinite(price) || price < 4 || price > 13) {
+      setAdminError("Cena mora biti broj izmedju 4 i 13.");
+      return;
+    }
+    setPriceSaving(true);
+    setAdminError("");
+    try {
+      const updated = await setFantasyPoolPlayerPrice(season.id, playerId, price, true);
+      setPool((previous) => previous.map((item) => (item.playerId === playerId ? updated : item)));
+      setEditingPriceId("");
+    } catch (err) {
+      setAdminError(err instanceof ApiError ? err.message : "Cena nije sacuvana.");
+    } finally {
+      setPriceSaving(false);
+    }
+  }
+
+  async function handleUnlockPrice(playerId: string) {
+    if (!season) return;
+    setAdminError("");
+    try {
+      const current = pool.find((item) => item.playerId === playerId);
+      const updated = await setFantasyPoolPlayerPrice(season.id, playerId, current?.currentPrice ?? 5, false);
+      setPool((previous) => previous.map((item) => (item.playerId === playerId ? updated : item)));
+    } catch (err) {
+      setAdminError(err instanceof ApiError ? err.message : "Cena nije otkljucana.");
+    }
+  }
+
+  async function handleToggleAvailability(player: FantasySeasonPoolPlayer) {
+    if (!season) return;
+    setAvailabilitySavingId(player.playerId);
+    setAdminError("");
+    try {
+      const updated = await setFantasyPoolPlayerAvailability(season.id, player.playerId, !player.isAvailable);
+      setPool((previous) => previous.map((item) => (item.playerId === player.playerId ? updated : item)));
+    } catch (err) {
+      setAdminError(err instanceof ApiError ? err.message : "Status igraca nije promenjen.");
+    } finally {
+      setAvailabilitySavingId("");
+    }
+  }
+
   async function handleSeasonStatusChange(status: string) {
     if (!season) return;
     setAdminError("");
@@ -185,39 +286,16 @@ export function FantasyScreen() {
     }
   }
 
-  async function handleGwStatusChange(gameweekId: string, status: string) {
-    setGwBusyId(gameweekId);
-    setAdminError("");
-    try {
-      await updateFantasyGameweek(gameweekId, { status });
-      load();
-    } catch (err) {
-      setAdminError(err instanceof ApiError ? err.message : "Status kola nije promenjen.");
-    } finally {
-      setGwBusyId("");
-    }
-  }
-
-  async function handleScoreGameweek(gameweekId: string) {
-    setGwBusyId(gameweekId);
-    setAdminError("");
-    try {
-      const result = await scoreFantasySeasonGameweek(gameweekId);
-      setSyncMessage(`Bodovano: ${result.updatedPicks} timova, ${result.pricedPlayers} igraca promenilo cenu.`);
-      load();
-    } catch (err) {
-      setAdminError(err instanceof ApiError ? err.message : "Bodovanje kola nije uspelo.");
-    } finally {
-      setGwBusyId("");
-    }
-  }
-
   function pickFor(slot: string): SelectedPick | null {
     return selected.find((pick) => pick.slot === slot) ?? null;
   }
 
+  // Not a flat constant: the server shifts a team's cap by the same amount their owned
+  // players' prices move each round (see scoreFantasySeasonGameweek), so a manager's
+  // unchanged squad never reads as over budget just because it got more valuable.
+  const budgetCap = team?.budgetCap ?? DEFAULT_BUDGET_CAP;
   const spent = useMemo(() => selected.reduce((sum, pick) => sum + pick.player.currentPrice, 0), [selected]);
-  const remaining = BUDGET_CAP - spent;
+  const remaining = budgetCap - spent;
   const hasCaptain = selected.some((pick) => pick.isCaptain);
 
   const transferWindow = team?.transferWindow ?? null;
@@ -371,8 +449,8 @@ export function FantasyScreen() {
       setSaveError("Izaberi kapitena.");
       return;
     }
-    if (spent > BUDGET_CAP) {
-      setSaveError(`Tim prelazi budzet od ${BUDGET_CAP} CR.`);
+    if (spent > budgetCap) {
+      setSaveError(`Tim prelazi budzet od ${budgetCap.toFixed(1)} CR.`);
       return;
     }
     if (transfersRemaining !== null && transfersUsed > (transferWindow?.transfersAllowed ?? 0)) {
@@ -396,12 +474,15 @@ export function FantasyScreen() {
   }
 
   const filteredPool = useMemo(() => {
-    if (!search.trim()) return pool;
+    const base = isAdmin && !showAllPool ? pool.filter((player) => player.isAvailable) : pool;
+    if (!search.trim()) return base;
     const query = search.trim().toLowerCase();
-    return pool.filter(
+    return base.filter(
       (player) => player.displayName.toLowerCase().includes(query) || player.teamName.toLowerCase().includes(query)
     );
-  }, [pool, search]);
+  }, [pool, search, isAdmin, showAllPool]);
+
+  const acceptedPoolCount = useMemo(() => pool.filter((player) => player.isAvailable).length, [pool]);
 
   if (loading) {
     return (
@@ -422,11 +503,13 @@ export function FantasyScreen() {
           <EmptyState
             message={
               isAdmin
-                ? "Jos nema fantasy sezone. Napravi je da bi korisnici mogli da prave svoje timove."
+                ? isWide
+                  ? "Jos nema fantasy sezone. Napravi je da bi korisnici mogli da prave svoje timove."
+                  : "Fantasy sezona se pokrece samo sa desktop verzije."
                 : "Admin jos nije pokrenuo fantasy sezonu. Vrati se kasnije."
             }
           />
-          {isAdmin ? (
+          {isAdmin && isWide ? (
             <PrimaryButton label="Napravi fantasy sezonu" onPress={() => setShowSeasonComposer(true)} />
           ) : null}
         </View>
@@ -447,34 +530,66 @@ export function FantasyScreen() {
   const activePickerSlot = pickerSlot;
   const activePickerPick = activePickerSlot ? pickFor(activePickerSlot) : null;
 
+  const leaguesLinked = (season.competitions ?? []).length > 0;
+  const playersSynced = pool.length > 0;
+  const gameweeksReady = (season.gameweeks ?? []).length > 0;
+  const allReady = leaguesLinked && playersSynced && gameweeksReady;
+
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.headerKicker}>Fantasy</Text>
-        <Text style={styles.headerTitle}>{isAdmin ? (season?.name ?? "Fantasy") : (team?.name ?? "Moj tim")}</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>{isAdmin ? (season?.name ?? "Fantasy") : (team?.name ?? "Fantasy")}</Text>
+          <Pill label={seasonStatusLabel(season.status)} tone={seasonStatusTone(season.status)} />
+        </View>
         {gameweek ? <Text style={styles.headerSubtitle}>{gameweek.name}</Text> : null}
       </View>
 
       <View style={styles.tabs}>
-        {(isAdmin ? (["pool", "leaderboard", "admin"] as Tab[]) : (["team", "pool", "leaderboard"] as Tab[])).map((value) => (
-          <TouchableOpacity key={value} style={[styles.tabButton, tab === value ? styles.tabButtonActive : null]} onPress={() => setTab(value)}>
-            <Text style={[styles.tabButtonText, tab === value ? styles.tabButtonTextActive : null]}>
-              {value === "team" ? "Moj tim" : value === "pool" ? "Igraci" : value === "leaderboard" ? "Tabela" : "Admin"}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {(isAdmin && isWide
+          ? (["team", "pool", "leaderboard", "admin"] as Tab[])
+          : (["team", "pool", "leaderboard"] as Tab[])
+        ).map((value) => {
+          const locked = !isAdmin && (value === "team" || value === "pool");
+          return (
+            <TouchableOpacity key={value} style={[styles.tabButton, tab === value ? styles.tabButtonActive : null]} onPress={() => setTab(value)}>
+              {locked ? (
+                <Ionicons name="lock-closed" size={11} color={tab === value ? "#fff" : colors.textMuted} />
+              ) : null}
+              <Text style={[styles.tabButtonText, tab === value ? styles.tabButtonTextActive : null]}>{tabLabel(value)}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, isWide ? styles.contentWide : null]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#fff" />}
       >
         {error ? <ErrorState message={error} onRetry={load} /> : null}
 
-        {tab === "team" && !gameweek ? <EmptyState message="Sezona uskoro pocinje. Vrati se kada admin otvori prvo kolo." /> : null}
+        {tab === "team" && !isAdmin ? (
+          <LockedComingSoonCard
+            title="Moj tim uskoro stize"
+            copy="Pravljenje fantasy tima ce biti dostupno cim zvanicna baza ekipa i igraca bude spremna za novu sezonu."
+          />
+        ) : null}
 
-        {tab === "team" && gameweek ? (
-          <View style={styles.section}>
+        {tab === "team" && isAdmin && !gameweek ? (
+          <EmptyState message="Sezona uskoro pocinje. Vrati se kada admin otvori prvo kolo." />
+        ) : null}
+
+        {tab === "team" && isAdmin && gameweek ? (
+          <View style={[styles.section, isWide ? styles.teamSectionWide : null]}>
+            {isAdmin ? (
+              <View style={styles.hintCard}>
+                <Text style={styles.hintTitle}>Tvoj probni tim</Text>
+                <Text style={styles.hintText}>
+                  Ovo je tvoj licni test tim kao admin - ne ucestvuje u tabeli. Koristi ga da uvek vidis kako izgleda i funkcionise "Moj tim" ekran koji fanovi koriste.
+                </Text>
+              </View>
+            ) : null}
             <View style={styles.statusRow}>
               <View style={styles.statusPill}>
                 <Text style={styles.statusValue}>{team?.totalPoints ?? 0}</Text>
@@ -487,7 +602,7 @@ export function FantasyScreen() {
                 <Text style={styles.statusLabel}>transferi</Text>
               </View>
               <View style={styles.statusPill}>
-                <Text style={styles.statusValue}>{isRoundOpen ? `${remaining.toFixed(1)}/${BUDGET_CAP}` : roundPoints}</Text>
+                <Text style={styles.statusValue}>{isRoundOpen ? `${remaining.toFixed(1)}/${budgetCap.toFixed(1)}` : roundPoints}</Text>
                 <Text style={styles.statusLabel}>{isRoundOpen ? "budzet (CR)" : "poena ovog kola"}</Text>
               </View>
             </View>
@@ -549,6 +664,8 @@ export function FantasyScreen() {
               />
             </LinearGradient>
 
+            <SponsorStrip />
+
             {transferWindow?.phase === "reposition" ? (
               <View style={styles.hintCard}>
                 <Text style={styles.hintTitle}>Raspored igraca</Text>
@@ -581,7 +698,7 @@ export function FantasyScreen() {
               loading={saving}
               disabled={
                 selected.length < STARTER_SLOTS.length + BENCH_SLOTS.length ||
-                spent > BUDGET_CAP ||
+                spent > budgetCap ||
                 !hasCaptain ||
                 transferWindow?.phase === "locked"
               }
@@ -589,7 +706,14 @@ export function FantasyScreen() {
           </View>
         ) : null}
 
-        {tab === "pool" ? (
+        {tab === "pool" && !isAdmin ? (
+          <LockedComingSoonCard
+            title="Igraci uskoro stizu"
+            copy="Lista igraca ce biti dostupna cim zvanicna baza ekipa i igraca bude spremna za novu sezonu."
+          />
+        ) : null}
+
+        {tab === "pool" && isAdmin ? (
           <View style={styles.section}>
             <TextInput
               style={styles.searchInput}
@@ -598,28 +722,77 @@ export function FantasyScreen() {
               value={search}
               onChangeText={setSearch}
             />
+            {isAdmin ? (
+              <TouchableOpacity style={styles.poolFilterToggle} onPress={() => setShowAllPool((current) => !current)}>
+                <Ionicons name={showAllPool ? "checkbox" : "square-outline"} size={18} color={colors.purple} />
+                <Text style={styles.poolFilterToggleText}>Prikazi i iskljucene igrace (za pregled pre pocetka sezone)</Text>
+              </TouchableOpacity>
+            ) : null}
             {filteredPool.length === 0 ? <EmptyState message="Nema igraca u fantasy bazi za ovo takmicenje." /> : null}
+            <View style={isWide ? styles.poolGrid : undefined}>
             {filteredPool.map((player) => (
-              <Card key={player.id} style={styles.poolCard}>
+              <Card
+                key={player.id}
+                style={[styles.poolCard, isWide ? styles.poolCardWide : null, !player.isAvailable ? styles.poolCardExcluded : null]}
+              >
                 <TouchableOpacity style={styles.pickInfo} onPress={() => setActivePlayerId(player.playerId)}>
                   <View style={styles.poolRowTop}>
-                    {player.avatarUrl ? (
-                      <Image source={{ uri: player.avatarUrl }} style={styles.poolFace} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.poolFace, { backgroundColor: kitColorForTeam(player.teamId) }]} />
-                    )}
+                    <View>
+                      <PoolAvatar avatarUrl={player.avatarUrl} teamId={player.teamId} />
+                      <AvailabilityDot status={player.matchAvailability} />
+                    </View>
                     <View style={styles.pickInfo}>
                       <Text style={styles.pickName}>{player.displayName}</Text>
                       <Text style={styles.pickMeta}>
                         {player.teamName} - {player.position || "igrac"}
                       </Text>
                       {player.competitionName ? <Text style={styles.pickLeague}>{player.competitionName}</Text> : null}
+                      {!player.isAvailable ? <Text style={styles.poolExcludedLabel}>Iskljucen iz fantazija</Text> : null}
                     </View>
                   </View>
                 </TouchableOpacity>
-                <Text style={styles.pickPrice}>{player.currentPrice.toFixed(1)} CR</Text>
+                {isAdmin && editingPriceId === player.playerId ? (
+                  <View style={styles.priceEditRow}>
+                    <TextInput
+                      style={styles.priceEditInput}
+                      value={priceDraft}
+                      onChangeText={setPriceDraft}
+                      keyboardType="decimal-pad"
+                      autoFocus
+                    />
+                    <TouchableOpacity onPress={() => handleSavePrice(player.playerId)} disabled={priceSaving}>
+                      <Text style={styles.priceEditSave}>{priceSaving ? "..." : "OK"}</Text>
+                    </TouchableOpacity>
+                    {player.isPriceLocked ? (
+                      <TouchableOpacity onPress={() => handleUnlockPrice(player.playerId)}>
+                        <Text style={styles.priceEditUnlock}>Otkljucaj</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : isAdmin ? (
+                  <TouchableOpacity style={styles.priceAdminWrap} onPress={() => startEditPrice(player)}>
+                    {player.isPriceLocked ? <Text style={styles.priceLockIcon}>🔒</Text> : null}
+                    <Text style={styles.pickPrice}>{player.currentPrice.toFixed(1)} CR</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <Text style={styles.pickPrice}>{player.currentPrice.toFixed(1)} CR</Text>
+                )}
+                {isAdmin ? (
+                  <TouchableOpacity
+                    style={styles.poolAvailabilityButton}
+                    disabled={availabilitySavingId === player.playerId}
+                    onPress={() => handleToggleAvailability(player)}
+                  >
+                    <Ionicons
+                      name={player.isAvailable ? "close-circle-outline" : "checkmark-circle-outline"}
+                      size={22}
+                      color={player.isAvailable ? colors.danger : colors.success}
+                    />
+                  </TouchableOpacity>
+                ) : null}
               </Card>
             ))}
+            </View>
           </View>
         ) : null}
 
@@ -630,7 +803,7 @@ export function FantasyScreen() {
         ) : null}
 
         {tab === "leaderboard" && gameweek ? (
-          <View style={styles.section}>
+          <View style={[styles.section, isWide ? styles.teamSectionWide : null]}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scopeRow}>
               <TouchableOpacity
                 style={[styles.scopeChip, leaderboardScope === "season" ? styles.scopeChipActive : null]}
@@ -640,7 +813,13 @@ export function FantasyScreen() {
                   Sezona
                 </Text>
               </TouchableOpacity>
-              {[...(season?.gameweeks ?? [])].reverse().map((gw) => (
+              {[...(season?.gameweeks ?? [])]
+                // Only rounds that have actually kicked off (locked) or finished show up
+                // here - a still-"open" future round has no picks/scores yet, so listing
+                // it in advance just gives an empty-looking table with nothing to show.
+                .filter((gw) => gw.status !== "open")
+                .reverse()
+                .map((gw) => (
                 <TouchableOpacity
                   key={gw.id}
                   style={[styles.scopeChip, leaderboardScope === gw.id ? styles.scopeChipActive : null]}
@@ -664,48 +843,168 @@ export function FantasyScreen() {
               <EmptyState message="Tabela fantasy menadzera jos nije dostupna." />
             ) : null}
             {!leaderboardLoading &&
-              leaderboard.map((entry) => {
-                const prizeThreshold = leaderboardScope === "season" ? 15 : 5;
-                const isPrizeRank = entry.rank <= prizeThreshold;
-                const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
-                return (
-                  <TouchableOpacity
-                    key={entry.fantasyTeamId}
-                    activeOpacity={0.8}
-                    onPress={() =>
-                      setViewingTeam({
-                        fantasyTeamId: entry.fantasyTeamId,
-                        gameweekId: leaderboardScope === "season" ? gameweek?.id : leaderboardScope,
-                        managerName: entry.managerName
-                      })
-                    }
-                  >
-                    <Card style={[styles.leaderRow, isPrizeRank ? styles.leaderRowPrize : null]}>
-                      <View style={[styles.leaderRankBadge, isPrizeRank ? styles.leaderRankBadgePrize : null]}>
-                        <Text style={[styles.leaderRankText, isPrizeRank ? styles.leaderRankTextPrize : null]}>
-                          {medal || entry.rank}
+              leaderboard.map((entry) => (
+                <LeaderboardRow
+                  key={entry.fantasyTeamId}
+                  entry={entry}
+                  showTotalPoints={leaderboardScope === "season"}
+                  prizeThreshold={leaderboardScope === "season" ? 15 : 5}
+                  onPress={() =>
+                    setViewingTeam({
+                      fantasyTeamId: entry.fantasyTeamId,
+                      gameweekId: leaderboardScope === "season" ? gameweek?.id : leaderboardScope,
+                      managerName: entry.managerName
+                    })
+                  }
+                />
+              ))}
+
+            <LinearGradient colors={gradients.hero} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={styles.privateHero}>
+              <View style={styles.privateHeroHeader}>
+                <View style={styles.privateHeroIcon}>
+                  <Ionicons name="lock-closed" size={16} color={colors.ink} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.privateEyebrow}>PRIVATNE LIGE</Text>
+                  <Text style={styles.privateTitle}>Igraj samo sa drugarima</Text>
+                </View>
+              </View>
+              <Text style={styles.privateSubtitle}>
+                Napravi zatvorenu ligu ili se pridruzi kodom - rangira samo vas, bez admina i bez uticaja na zvanicnu tabelu.
+              </Text>
+
+              <View style={styles.privateActionsRow}>
+                <TouchableOpacity style={styles.privateActionButton} onPress={() => setMiniLeagueModal("create")}>
+                  <Ionicons name="add-circle-outline" size={18} color={colors.ink} />
+                  <Text style={styles.privateActionButtonText}>Napravi ligu</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.privateActionButton, styles.privateActionButtonGhost]}
+                  onPress={() => setMiniLeagueModal("join")}
+                >
+                  <Ionicons name="key-outline" size={18} color="#fff" />
+                  <Text style={[styles.privateActionButtonText, styles.privateActionButtonTextGhost]}>Pridruzi se kodom</Text>
+                </TouchableOpacity>
+              </View>
+
+              {myMiniLeagues.length === 0 ? (
+                <Text style={styles.privateEmptyText}>Jos uvek nisi u nijednoj privatnoj ligi.</Text>
+              ) : (
+                <View style={styles.privateListWrap}>
+                  {myMiniLeagues.map((league) => (
+                    <TouchableOpacity
+                      key={league.id}
+                      style={styles.privateLeagueRow}
+                      activeOpacity={0.8}
+                      onPress={() => setViewingMiniLeagueId(league.id)}
+                    >
+                      <View style={styles.privateLeagueBadge}>
+                        <Ionicons name="shield-half-outline" size={16} color={colors.ink} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.privateLeagueName}>{league.name}</Text>
+                        <Text style={styles.privateLeagueMeta}>
+                          {league.memberCount} {league.memberCount === 1 ? "clan" : "clanova"}
+                          {league.isCreator ? " - osnivac si" : ""}
                         </Text>
                       </View>
-                      <View style={styles.pickInfo}>
-                        <Text style={styles.pickName}>{entry.name}</Text>
-                        <Text style={styles.pickMeta}>{entry.managerName}</Text>
-                      </View>
-                      <View style={styles.leaderPointsCol}>
-                        <Text style={styles.pickPrice}>
-                          {(leaderboardScope === "season" ? entry.totalPoints : entry.points) ?? 0} pts
-                        </Text>
-                        {isPrizeRank ? <Text style={styles.prizeBadge}>🏆 Nagrada</Text> : null}
-                      </View>
-                    </Card>
-                  </TouchableOpacity>
-                );
-              })}
+                      <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.5)" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+            </LinearGradient>
+
+            <View style={{ marginTop: 8 }}>
+              <SponsorStrip />
+            </View>
           </View>
         ) : null}
 
-        {tab === "admin" && isAdmin ? (
-          <View style={styles.section}>
-            <Card style={styles.adminCard}>
+        {miniLeagueModal && season ? (
+          <MiniLeagueModal
+            mode={miniLeagueModal}
+            fantasySeasonId={season.id}
+            onClose={() => setMiniLeagueModal(null)}
+            onSaved={handleMiniLeagueSaved}
+          />
+        ) : null}
+
+        {viewingMiniLeagueId ? (
+          <MiniLeagueDetailModal
+            miniLeagueId={viewingMiniLeagueId}
+            gameweeks={season?.gameweeks ?? []}
+            onClose={() => setViewingMiniLeagueId(null)}
+            onChanged={handleMiniLeagueChanged}
+            onSelectTeam={(fantasyTeamId, gameweekId, managerName) => setViewingTeam({ fantasyTeamId, gameweekId, managerName })}
+          />
+        ) : null}
+
+        {tab === "admin" && isAdmin && isWide ? (
+          <View style={[styles.section, isWide ? styles.adminGridWide : null]}>
+            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
+              <SectionTitle eyebrow="Pregled" title="Status sezone" />
+              <View style={styles.statusDashboardBadgeRow}>
+                <Pill label={seasonStatusLabel(season.status)} tone={seasonStatusTone(season.status)} />
+                <Text style={styles.statusDashboardBadgeHint}>
+                  {season.status === "active"
+                    ? "Fantasy je pokrenut - korisnici mogu da prave i menjaju svoje timove."
+                    : season.status === "finished"
+                    ? "Sezona je zavrsena. Rezultati i tabela ostaju vidljivi korisnicima."
+                    : "Fantasy JOS NIJE pokrenut. Korisnici ne mogu da prave timove dok ne pritisnes \"Pokreni sezonu\" ispod."}
+                </Text>
+              </View>
+
+              <View style={styles.checklistRow}>
+                <Ionicons
+                  name={leaguesLinked ? "checkmark-circle" : "ellipse-outline"}
+                  size={20}
+                  color={leaguesLinked ? colors.success : colors.textMuted}
+                />
+                <Text style={styles.checklistText}>
+                  Lige povezane: {(season.competitions ?? []).length}
+                </Text>
+              </View>
+              <View style={styles.checklistRow}>
+                <Ionicons
+                  name={playersSynced ? "checkmark-circle" : "ellipse-outline"}
+                  size={20}
+                  color={playersSynced ? colors.success : colors.textMuted}
+                />
+                <Text style={styles.checklistText}>
+                  Igraci u bazi: {acceptedPoolCount} prihvaceno od {pool.length} ukupno
+                </Text>
+              </View>
+              <View style={styles.checklistRow}>
+                <Ionicons
+                  name={gameweeksReady ? "checkmark-circle" : "ellipse-outline"}
+                  size={20}
+                  color={gameweeksReady ? colors.success : colors.textMuted}
+                />
+                <Text style={styles.checklistText}>
+                  Fantasy kola generisana: {(season.gameweeks ?? []).length}
+                </Text>
+              </View>
+
+              {season.status !== "active" ? (
+                <TouchableOpacity
+                  style={[styles.adminActionButtonPrimary, !allReady ? styles.adminActionButtonDisabled : null]}
+                  onPress={() => handleSeasonStatusChange("active")}
+                  disabled={!allReady}
+                >
+                  <Text style={styles.adminActionButtonPrimaryText}>Pokreni sezonu</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.adminActionButton} onPress={() => handleSeasonStatusChange("finished")}>
+                  <Text style={styles.adminActionButtonText}>Zavrsi sezonu</Text>
+                </TouchableOpacity>
+              )}
+              {!allReady && season.status !== "active" ? (
+                <Text style={styles.adminCardHint}>Zavrsi sve korake iznad da bi mogao da pokrenes sezonu.</Text>
+              ) : null}
+            </Card>
+
+            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
               <SectionTitle eyebrow="Admin" title="Fantasy sezone" />
               {allSeasons.length > 1 ? (
                 <View style={styles.chipsRow}>
@@ -727,7 +1026,7 @@ export function FantasyScreen() {
               </TouchableOpacity>
             </Card>
 
-            <Card style={styles.adminCard}>
+            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
               <SectionTitle eyebrow={season.name} title="Podesavanja sezone" />
               <View style={styles.chipsRow}>
                 {SEASON_STATUSES.map((status) => (
@@ -766,15 +1065,13 @@ export function FantasyScreen() {
               {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
             </Card>
 
-            <Card style={styles.adminCard}>
-              <View style={styles.adminCardHead}>
-                <SectionTitle eyebrow="Raspored" title="Fantasy kola" />
-                <TouchableOpacity style={styles.adminActionButton} onPress={() => setShowGameweekComposer(true)}>
-                  <Text style={styles.adminActionButtonText}>Novo kolo</Text>
-                </TouchableOpacity>
-              </View>
+            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
+              <SectionTitle eyebrow="Raspored" title="Fantasy kola" />
+              <Text style={styles.adminCardHint}>
+                Kola su nedelje ponedeljak-nedelja i potpuno su automatska - otvaraju se, zakljucavaju (na pocetku prve utakmice te nedelje) i boduju se same, na osnovu rasporeda povezanih liga. Nema rucne akcije.
+              </Text>
 
-              {(season.gameweeks ?? []).length === 0 ? <EmptyState message="Ova sezona jos nema fantasy kola." /> : null}
+              {(season.gameweeks ?? []).length === 0 ? <EmptyState message="Ova sezona jos nema fantasy kola - pojavice se cim povezane lige dobiju raspored utakmica." /> : null}
 
               {(season.gameweeks ?? []).map((gw) => (
                 <View key={gw.id} style={styles.gwRow}>
@@ -782,27 +1079,7 @@ export function FantasyScreen() {
                     <Text style={styles.pickName}>{gw.name}</Text>
                     <Text style={styles.pickMeta}>Zakljucava se {formatGwDate(gw.locksAt)}</Text>
                   </View>
-                  <View style={styles.chipsRow}>
-                    {GAMEWEEK_STATUSES.map((status) => (
-                      <TouchableOpacity
-                        key={status}
-                        style={[styles.statusChipSmall, gw.status === status ? styles.statusChipActive : null]}
-                        disabled={gwBusyId === gw.id}
-                        onPress={() => handleGwStatusChange(gw.id, status)}
-                      >
-                        <Text style={[styles.statusChipSmallText, gw.status === status ? styles.statusChipTextActive : null]}>
-                          {status}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.adminActionButton, gwBusyId === gw.id ? styles.adminActionButtonDisabled : null]}
-                    disabled={gwBusyId === gw.id}
-                    onPress={() => handleScoreGameweek(gw.id)}
-                  >
-                    <Text style={styles.adminActionButtonText}>{gwBusyId === gw.id ? "Radim..." : "Boduj kolo"}</Text>
-                  </TouchableOpacity>
+                  <Pill label={gameweekStatusLabel(gw.status)} tone={gameweekStatusTone(gw.status)} />
                 </View>
               ))}
             </Card>
@@ -826,18 +1103,6 @@ export function FantasyScreen() {
           onClose={() => setEditSeasonComposer(false)}
           onSaved={() => {
             setEditSeasonComposer(false);
-            load();
-          }}
-        />
-      ) : null}
-
-      {showGameweekComposer ? (
-        <FantasyGameweekComposerModal
-          fantasySeasonId={season.id}
-          gameweekLengthDays={season.gameweekLengthDays}
-          onClose={() => setShowGameweekComposer(false)}
-          onSaved={() => {
-            setShowGameweekComposer(false);
             load();
           }}
         />
@@ -871,10 +1136,64 @@ export function FantasyScreen() {
   );
 }
 
+// Same "locked, coming soon" treatment as the Gol nedelje card on News - the tab stays
+// visible (with a lock icon) so fans know the feature exists, but the real screen only
+// works once there's a real team/player database to build a fantasy squad from.
+function LockedComingSoonCard({ title, copy }: { title: string; copy: string }) {
+  return (
+    <Card style={styles.lockedCard}>
+      <View style={styles.lockedHead}>
+        <SectionTitle eyebrow="Fantasy" title={title} />
+        <Pill label="Uskoro" tone="warning" />
+      </View>
+      <View style={styles.lockedBody}>
+        <View style={styles.lockedIconWrap}>
+          <Ionicons name="lock-closed" size={18} color={colors.purple} />
+        </View>
+        <Text style={styles.lockedCopy}>{copy}</Text>
+      </View>
+    </Card>
+  );
+}
+
+function PoolAvatar({ avatarUrl, teamId }: { avatarUrl?: string; teamId: string }) {
+  const [failed, setFailed] = useState(false);
+  if (avatarUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: avatarUrl }}
+        style={styles.poolFace}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return <View style={[styles.poolFace, { backgroundColor: kitColorForTeam(teamId) }]} />;
+}
+
 function seasonStatusLabel(status: string): string {
   if (status === "active") return "Aktivna";
   if (status === "finished") return "Zavrsena";
   return "Priprema";
+}
+
+function seasonStatusTone(status: string): "success" | "warning" | "neutral" {
+  if (status === "active") return "success";
+  if (status === "finished") return "neutral";
+  return "warning";
+}
+
+function gameweekStatusLabel(status: string): string {
+  if (status === "open") return "Otvoreno";
+  if (status === "locked") return "Zakljucano";
+  if (status === "finished") return "Zavrseno";
+  return status;
+}
+
+function gameweekStatusTone(status: string): "success" | "warning" | "neutral" {
+  if (status === "open") return "success";
+  if (status === "finished") return "neutral";
+  return "warning";
 }
 
 function formatGwDate(value: string): string {
@@ -887,15 +1206,35 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   header: { paddingTop: 58, paddingHorizontal: 18, paddingBottom: 10 },
   headerKicker: { color: colors.purple, fontWeight: "700", fontSize: 12, textTransform: "uppercase" },
-  headerTitle: { color: colors.ink, fontSize: 24, fontWeight: "700" },
+  headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  headerTitle: { color: colors.ink, fontSize: 24, fontWeight: "700", flexShrink: 1 },
   headerSubtitle: { color: colors.textMuted, marginTop: 2, fontWeight: "600" },
+  statusDashboardBadgeRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  statusDashboardBadgeHint: { flex: 1, color: colors.textMuted, fontSize: 12, lineHeight: 17 },
+  checklistRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  checklistText: { color: colors.textPrimary, fontSize: 13, fontWeight: "600" },
   tabs: { flexDirection: "row", gap: 8, paddingHorizontal: 18, marginBottom: 8 },
-  tabButton: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: colors.surfaceMuted, alignItems: "center" },
+  tabButton: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 4,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceMuted
+  },
   tabButtonActive: { backgroundColor: colors.ink },
   tabButtonText: { color: colors.textMuted, fontWeight: "700", fontSize: 12 },
   tabButtonTextActive: { color: "#fff" },
   content: { paddingHorizontal: 18, paddingBottom: 40, gap: 12 },
+  contentWide: { paddingHorizontal: 32, gap: 20 },
   section: { gap: 10 },
+  teamSectionWide: { maxWidth: 560, alignSelf: "center", width: "100%" },
+  poolGrid: { flexDirection: "row", flexWrap: "wrap", gap: 14 },
+  poolCardWide: { width: 380 },
+  adminGridWide: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 16 },
+  adminCardWide: { flexBasis: 420, flexGrow: 1 },
   statusRow: { flexDirection: "row", gap: 8 },
   statusPill: {
     flex: 1,
@@ -937,11 +1276,40 @@ const styles = StyleSheet.create({
   },
   hintTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
   hintText: { color: colors.textMuted, fontSize: 12, marginTop: 4, lineHeight: 17 },
+  lockedCard: { gap: 10 },
+  lockedHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  lockedBody: { flexDirection: "row", alignItems: "center", gap: 12 },
+  lockedIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  lockedCopy: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" },
   pickInfo: { flex: 1 },
   pickName: { color: colors.textPrimary, fontWeight: "700" },
   pickMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   pickLeague: { color: colors.purple, fontSize: 11, fontWeight: "700", marginTop: 2 },
   pickPrice: { color: colors.pink, fontWeight: "700" },
+  priceAdminWrap: { flexDirection: "row", alignItems: "center", gap: 4 },
+  priceLockIcon: { fontSize: 11 },
+  priceEditRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  priceEditInput: {
+    width: 56,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    color: colors.textPrimary,
+    fontWeight: "700",
+    textAlign: "center"
+  },
+  priceEditSave: { color: colors.purple, fontWeight: "800", fontSize: 13 },
+  priceEditUnlock: { color: colors.textMuted, fontWeight: "700", fontSize: 11 },
   saveError: { color: colors.danger, fontWeight: "700", textAlign: "center" },
   captainHint: { color: colors.warning, fontWeight: "700", textAlign: "center", fontSize: 12 },
   searchInput: {
@@ -953,7 +1321,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line
   },
+  poolFilterToggle: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  poolFilterToggleText: { color: colors.textMuted, fontWeight: "600", fontSize: 12, flex: 1 },
   poolCard: { flexDirection: "row", alignItems: "center", gap: 10 },
+  poolCardExcluded: { opacity: 0.55, borderWidth: 1, borderColor: colors.danger },
+  poolExcludedLabel: { color: colors.danger, fontSize: 11, fontWeight: "700", marginTop: 2 },
+  poolAvailabilityButton: { paddingLeft: 6 },
   poolRowTop: { flexDirection: "row", alignItems: "center", gap: 10 },
   poolFace: {
     width: 38,
@@ -969,21 +1342,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2
   },
-  leaderRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  leaderRowPrize: { borderWidth: 1.5, borderColor: colors.yellow, backgroundColor: "rgba(227,178,60,0.08)" },
-  leaderRankBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  leaderRankBadgePrize: { backgroundColor: colors.yellow },
-  leaderRankText: { color: colors.textMuted, fontWeight: "900", fontSize: 13 },
-  leaderRankTextPrize: { color: colors.ink },
-  leaderPointsCol: { alignItems: "flex-end", gap: 2 },
-  prizeBadge: { color: colors.warning, fontSize: 10, fontWeight: "700" },
   scopeRow: { flexDirection: "row", gap: 8, paddingBottom: 4 },
   scopeChip: {
     borderRadius: 999,
@@ -997,6 +1355,65 @@ const styles = StyleSheet.create({
   scopeChipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
   scopeChipTextActive: { color: "#fff" },
   prizeHint: { color: colors.textMuted, fontSize: 12, fontWeight: "600", textAlign: "center", marginBottom: 4 },
+  privateHero: {
+    borderRadius: 22,
+    padding: 18,
+    marginTop: 18,
+    gap: 14
+  },
+  privateHeroHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+  privateHeroIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  privateEyebrow: { color: colors.primary, fontWeight: "800", fontSize: 11, letterSpacing: 1 },
+  privateTitle: { color: "#fff", fontWeight: "800", fontSize: 18, marginTop: 2 },
+  privateSubtitle: { color: colors.textOnDarkMuted, fontSize: 13, lineHeight: 19 },
+  privateActionsRow: { flexDirection: "row", gap: 10 },
+  privateActionButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 12
+  },
+  privateActionButtonGhost: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)"
+  },
+  privateActionButtonText: { color: colors.ink, fontWeight: "700", fontSize: 13 },
+  privateActionButtonTextGhost: { color: "#fff" },
+  privateEmptyText: { color: colors.textOnDarkMuted, fontSize: 13, fontStyle: "italic" },
+  privateListWrap: { gap: 8 },
+  privateLeagueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    paddingVertical: 12,
+    paddingHorizontal: 14
+  },
+  privateLeagueBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  privateLeagueName: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  privateLeagueMeta: { color: colors.textOnDarkMuted, fontSize: 12, marginTop: 2 },
   adminCard: {
     backgroundColor: "#fff",
     borderRadius: 18,
@@ -1005,7 +1422,7 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10
   },
-  adminCardHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  adminCardHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
   chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   seasonChip: {
     borderRadius: 999,
@@ -1029,15 +1446,6 @@ const styles = StyleSheet.create({
   statusChipActive: { backgroundColor: colors.purple, borderColor: colors.purple },
   statusChipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 12 },
   statusChipTextActive: { color: "#fff" },
-  statusChipSmall: {
-    borderRadius: 999,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.line
-  },
-  statusChipSmallText: { color: colors.textPrimary, fontWeight: "700", fontSize: 10 },
   adminButtonsRow: { flexDirection: "row", gap: 8 },
   adminActionButton: {
     flex: 1,
@@ -1062,6 +1470,8 @@ const styles = StyleSheet.create({
   adminActionButtonDisabled: { opacity: 0.5 },
   syncMessage: { color: colors.purple, fontWeight: "700", fontSize: 12, textAlign: "center" },
   gwRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     paddingVertical: 10,
     borderTopWidth: 1,

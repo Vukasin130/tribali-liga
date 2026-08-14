@@ -1,12 +1,15 @@
 import React from "react";
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
 type LegalKind = "privacy" | "terms";
 
 export function LegalScreen({ kind, onClose }: { kind: LegalKind; onClose: () => void }) {
   const content = kind === "privacy" ? PRIVACY_SECTIONS : TERMS_SECTIONS;
   const title = kind === "privacy" ? "Politika privatnosti" : "Uslovi koriscenja";
+  const isWide = useIsWideScreen();
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
@@ -14,7 +17,7 @@ export function LegalScreen({ kind, onClose }: { kind: LegalKind; onClose: () =>
         <TouchableOpacity style={styles.closeButton} onPress={onClose}>
           <Text style={styles.closeButtonText}>Zatvori</Text>
         </TouchableOpacity>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.eyebrow}>Tribali Liga</Text>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.updated}>Poslednje azurirano: jul 2026.</Text>

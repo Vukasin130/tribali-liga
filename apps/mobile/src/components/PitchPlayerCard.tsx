@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../theme/colors";
@@ -30,6 +30,14 @@ export function kitGradientForTeam(teamId: string): readonly [string, string] {
   return [KIT_COLORS_LIGHT[index], KIT_COLORS[index]];
 }
 
+function initialsFor(name?: string): string {
+  if (!name) return "";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 export function PitchPlayerCard({
   name,
   teamId,
@@ -59,17 +67,13 @@ export function PitchPlayerCard({
 }) {
   const width = compact ? CARD_WIDTH_COMPACT : CARD_WIDTH;
   const portraitHeight = compact ? PORTRAIT_HEIGHT_COMPACT : PORTRAIT_HEIGHT;
+  const [photoFailed, setPhotoFailed] = useState(false);
 
   if (!name) {
     return (
       <TouchableOpacity style={[styles.emptyCard, { width }]} onPress={onPress} activeOpacity={0.7}>
         <View style={[styles.portraitEmpty, { width, height: portraitHeight }]}>
           <Text style={styles.emptyPlus}>+</Text>
-          {weightBadge ? (
-            <View style={styles.weightBadgeEmpty}>
-              <Text style={styles.weightBadgeText}>{weightBadge}</Text>
-            </View>
-          ) : null}
         </View>
         <Text style={[styles.emptyLabel, compact ? styles.textCompact : null]} numberOfLines={1}>
           {emptyLabel || "Izaberi"}
@@ -89,8 +93,13 @@ export function PitchPlayerCard({
       activeOpacity={0.85}
     >
       <View style={styles.cardInner}>
-        {avatarUrl ? (
-          <Image source={{ uri: avatarUrl }} style={[styles.portraitPhoto, { height: portraitHeight }]} resizeMode="cover" />
+        {avatarUrl && !photoFailed ? (
+          <Image
+            source={{ uri: avatarUrl }}
+            style={[styles.portraitPhoto, { height: portraitHeight }]}
+            resizeMode="cover"
+            onError={() => setPhotoFailed(true)}
+          />
         ) : (
           <LinearGradient
             colors={gradient}
@@ -99,7 +108,9 @@ export function PitchPlayerCard({
             style={[styles.portrait, { height: portraitHeight }]}
           >
             <View style={styles.headShadow} />
-            <View style={styles.head} />
+            <View style={styles.head}>
+              <Text style={styles.headInitials}>{initialsFor(name)}</Text>
+            </View>
             <View style={styles.shine} />
           </LinearGradient>
         )}
@@ -189,8 +200,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#f0c7ae",
     marginTop: 7,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.6)"
+    borderColor: "rgba(255,255,255,0.6)",
+    alignItems: "center",
+    justifyContent: "center"
   },
+  headInitials: { color: "#5c3a24", fontSize: 9, fontWeight: "800" },
   captainBadge: {
     position: "absolute",
     top: -6,
@@ -230,18 +244,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
     zIndex: 5
-  },
-  weightBadgeEmpty: {
-    position: "absolute",
-    top: 3,
-    left: 3,
-    minWidth: 24,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.28)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 4
   },
   weightBadgeText: { color: "#fff", fontWeight: "700", fontSize: 9 },
   name: {

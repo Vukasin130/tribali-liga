@@ -3,34 +3,46 @@ import React from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./src/api/queryClient";
 import { AuthProvider } from "./src/state/AuthContext";
+import { LayoutModeProvider } from "./src/state/LayoutModeContext";
 import { RootNavigator } from "./src/navigation/RootNavigator";
+
+// On web, the app is designed phone-only - always render it inside a fixed-width
+// phone-shaped frame instead of stretching across the full browser window, regardless
+// of how wide/tall that window actually is. The desktop admin experience lives in the
+// separate apps/desktop project (imports this app's screens/logic, never the reverse).
+function WebShell({ children }: { children: React.ReactNode }) {
+  if (Platform.OS !== "web") return <>{children}</>;
+
+  return (
+    <View style={webStyles.backdrop}>
+      <View style={webStyles.notch} />
+      <View style={webStyles.phoneFrame}>{children}</View>
+    </View>
+  );
+}
 
 function AppContent() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <StatusBar style="light" />
-        <RootNavigator />
-      </AuthProvider>
-    </SafeAreaProvider>
+    <QueryClientProvider client={queryClient}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <LayoutModeProvider isWide={false}>
+            <WebShell>
+              <StatusBar style="light" />
+              <RootNavigator />
+            </WebShell>
+          </LayoutModeProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </QueryClientProvider>
   );
 }
 
 export default function App() {
-  if (Platform.OS !== "web") return <AppContent />;
-
-  // On web, the app is designed phone-only - always render it inside a fixed-width
-  // phone-shaped frame instead of stretching across the full browser window, regardless
-  // of how wide/tall that window actually is.
-  return (
-    <View style={webStyles.backdrop}>
-      <View style={webStyles.notch} />
-      <View style={webStyles.phoneFrame}>
-        <AppContent />
-      </View>
-    </View>
-  );
+  return <AppContent />;
 }
 
 const webStyles = StyleSheet.create({

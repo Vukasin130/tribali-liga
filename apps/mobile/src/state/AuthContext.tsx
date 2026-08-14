@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { getAuthToken, loadStoredToken, setAuthToken } from "../api/client";
-import { fetchSession, login as loginRequest, register as registerRequest } from "../api/endpoints";
+import { fetchSession, login as loginRequest, register as registerRequest, registerPushToken } from "../api/endpoints";
+import { registerForPushNotificationsAsync } from "../notifications";
 import type { AuthUser } from "../api/types";
 
 interface AuthContextValue {
@@ -8,7 +9,7 @@ interface AuthContextValue {
   status: "checking" | "signed-out" | "signed-in";
   error: string;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: { email: string; password: string; displayName: string; roleIntent?: string }) => Promise<void>;
+  register: (payload: { email: string; password: string; displayName: string; roleIntent?: string; teamId?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: (user: AuthUser) => void;
 }
@@ -51,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  async function register(payload: { email: string; password: string; displayName: string; roleIntent?: string }) {
+  async function register(payload: { email: string; password: string; displayName: string; roleIntent?: string; teamId?: string }) {
     setError("");
     try {
       await registerRequest(payload);
@@ -71,6 +72,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   function refreshUser(nextUser: AuthUser) {
     setUser(nextUser);
   }
+
+  useEffect(() => {
+    if (status !== "signed-in") return;
+    registerForPushNotificationsAsync()
+      .then((token) => (token ? registerPushToken(token) : undefined))
+      .catch(() => undefined);
+  }, [status]);
 
   return (
     <AuthContext.Provider value={{ user, status, error, login, register, logout, refreshUser }}>

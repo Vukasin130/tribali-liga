@@ -27,7 +27,20 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#C9A227"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Tribali Liga koristi galeriju da otpremis slike i video zapise (npr. gol nedelje, vesti, profilnu sliku)."
+        }
+      ]
     ]
   }
 }

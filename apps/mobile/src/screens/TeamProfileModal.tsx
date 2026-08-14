@@ -2,14 +2,20 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { fetchTeamProfile } from "../api/endpoints";
+import { fetchTeamProfile, removePlayerFromTeam } from "../api/endpoints";
 import type { MatchSummary, TeamProfile } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill } from "../components/ui";
 import { colors, gradients } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { kitGradientForTeam } from "../components/PitchPlayerCard";
 import { useAuth } from "../state/AuthContext";
 import { PlayerProfileModal } from "./PlayerProfileModal";
 import { PlayerEditorModal } from "./PlayerEditorModal";
+import { TeamEditorModal } from "./TeamEditorModal";
+import { MatchDetailModal } from "./MatchDetailModal";
+import { SponsorStrip } from "../components/SponsorStrip";
+import { TeamCrest } from "../components/TeamCrest";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -21,6 +27,27 @@ function formatDateTime(value: string): string {
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleString("sr-RS", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
+
+function RosterAvatar({ avatarUrl, displayName }: { avatarUrl?: string; displayName: string }) {
+  const [failed, setFailed] = useState(false);
+  if (avatarUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: avatarUrl }}
+        style={styles.playerAvatar}
+        resizeMode="cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <View style={styles.playerAvatarFallback}>
+      <Text style={styles.playerAvatarFallbackText}>{initialsOf(displayName)}</Text>
+    </View>
+  );
+}
+
+const POSITION_LABEL: Record<string, string> = { golman: "GK", odbrana: "ODB", napad: "NAP" };
 
 type Result = "W" | "D" | "L";
 
@@ -47,11 +74,17 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
+  const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [showEditTeam, setShowEditTeam] = useState(false);
+  const [siblingTeamId, setSiblingTeamId] = useState<string | null>(null);
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const isWide = useIsWideScreen();
 
   function load() {
     setLoading(true);
     setError("");
+    setPhotoFailed(false);
     fetchTeamProfile(teamId)
       .then(setProfile)
       .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam ekipu."))
@@ -59,6 +92,12 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
   }
 
   useEffect(load, [teamId]);
+
+  function handleRemovePlayer(playerId: string) {
+    removePlayerFromTeam(teamId, playerId)
+      .then(setProfile)
+      .catch(() => undefined);
+  }
 
   const primaryStanding = profile?.standings[0] ?? null;
   const otherStandings = profile?.standings.slice(1) ?? [];
@@ -82,7 +121,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
         ) : null}
 
         {profile ? (
-          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]} showsVerticalScrollIndicator={false}>
             <LinearGradient colors={gradients.hero} style={styles.hero}>
               <View style={styles.heroTopRow}>
                 <TouchableOpacity style={styles.iconButton} onPress={onClose}>
@@ -90,16 +129,21 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                 </TouchableOpacity>
                 <Text style={styles.heroBadgeText}>Profil ekipe</Text>
                 {isAdmin ? (
-                  <TouchableOpacity style={styles.iconButton} onPress={() => setShowAddPlayer(true)}>
-                    <Ionicons name="person-add-outline" size={16} color="#fff" />
+                  <TouchableOpacity style={styles.iconButton} onPress={() => setShowEditTeam(true)}>
+                    <Ionicons name="pencil-outline" size={16} color="#fff" />
                   </TouchableOpacity>
                 ) : (
-                  <View style={styles.iconButton} />
+                  <View style={styles.iconButtonSpacer} />
                 )}
               </View>
 
-              {profile.logoUrl ? (
-                <Image source={{ uri: profile.logoUrl }} style={styles.crestPhoto} resizeMode="cover" />
+              {profile.logoUrl && !photoFailed ? (
+                <Image
+                  source={{ uri: profile.logoUrl }}
+                  style={styles.crestPhoto}
+                  resizeMode="cover"
+                  onError={() => setPhotoFailed(true)}
+                />
               ) : (
                 <LinearGradient colors={gradient} style={styles.crestFallback}>
                   <Text style={styles.crestInitials}>{initialsOf(profile.name)}</Text>
@@ -148,9 +192,33 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                 </View>
               </Card>
 
+              {profile.teams.length > 1 ? (
+                <View>
+                  <SectionHeader icon="layers-outline" label="Isti klub igra i u" />
+                  <Card style={styles.teamsCard}>
+                    {profile.teams
+                      .filter((t) => t.teamId !== teamId)
+                      .map((t, index) => (
+                        <TouchableOpacity
+                          key={t.teamId}
+                          style={[styles.teamRow, index > 0 ? styles.teamRowDivider : null]}
+                          onPress={() => setSiblingTeamId(t.teamId)}
+                        >
+                          <TeamCrest teamId={t.teamId} name={t.teamName} size={30} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.teamRowName}>{t.teamName}</Text>
+                            <Text style={styles.teamRowMeta}>{t.competitionName}{t.seasonName ? ` - ${t.seasonName}` : ""}</Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      ))}
+                  </Card>
+                </View>
+              ) : null}
+
               {profile.nextMatch ? (
                 <Card style={styles.nextMatchCard}>
-                  <Text style={styles.sectionLabel}>Naredna utakmica</Text>
+                  <SectionHeader icon="calendar-outline" label="Naredna utakmica" />
                   <View style={styles.nextMatchRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.nextMatchTeams}>
@@ -168,81 +236,127 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
 
               {form.length > 0 ? (
                 <View>
-                  <Text style={styles.sectionLabel}>Forma (poslednjih {form.length})</Text>
-                  <View style={styles.formTrack}>
+                  <SectionHeader icon="trending-up-outline" label={`Forma (poslednjih ${form.length})`} />
+                  <Card style={styles.formTrack}>
                     {form.map(({ match, result }) => (
                       <View key={match.id} style={[styles.formChip, { backgroundColor: RESULT_TONE[result].bg }]}>
                         <Text style={[styles.formChipText, { color: RESULT_TONE[result].fg }]}>{RESULT_LABEL[result]}</Text>
                       </View>
                     ))}
-                  </View>
+                  </Card>
                 </View>
               ) : null}
 
               {otherStandings.length > 0 ? (
                 <View>
-                  <Text style={styles.sectionLabel}>Ucinak po takmicenjima</Text>
-                  {profile.standings.map((standing) => (
-                    <Card key={standing.id} style={styles.standingRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.standingRowName}>{standing.competitionName || standing.groupName || "Takmicenje"}</Text>
-                        <Text style={styles.standingRowMeta}>
-                          {standing.played} mec.  {standing.wins}-{standing.draws}-{standing.losses}  {standing.goalsFor}:{standing.goalsAgainst}
-                        </Text>
+                  <SectionHeader icon="podium-outline" label="Ucinak po takmicenjima" />
+                  <Card style={styles.standingsCard}>
+                    {profile.standings.map((standing, index) => (
+                      <View key={standing.id} style={[styles.standingRow, index > 0 ? styles.standingRowDivider : null]}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.standingRowName}>{standing.competitionName || standing.groupName || "Takmicenje"}</Text>
+                          <Text style={styles.standingRowMeta}>
+                            {standing.played} mec.  {standing.wins}-{standing.draws}-{standing.losses}  {standing.goalsFor}:{standing.goalsAgainst}
+                          </Text>
+                        </View>
+                        <Text style={styles.standingRowPoints}>{standing.position ? `#${standing.position}` : `${standing.points} b.`}</Text>
                       </View>
-                      <Text style={styles.standingRowPoints}>{standing.position ? `#${standing.position}` : `${standing.points} b.`}</Text>
-                    </Card>
-                  ))}
+                    ))}
+                  </Card>
                 </View>
               ) : null}
 
               <View>
                 <View style={styles.rosterHead}>
-                  <Text style={styles.sectionLabel}>Roster - sortirano po fantasy poenima</Text>
+                  <SectionHeader icon="people-outline" label="Roster - sortirano po fantasy poenima" />
+                  {isAdmin ? (
+                    <TouchableOpacity style={styles.addButton} onPress={() => setShowAddPlayer(true)}>
+                      <Ionicons name="add" size={14} color="#fff" />
+                      <Text style={styles.addButtonText}>Igrac</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
-                {profile.players.length === 0 ? <EmptyState message="Nema igraca u bazi." /> : null}
-                {profile.players.map((player, index) => (
-                  <TouchableOpacity key={player.id} style={styles.playerRow} onPress={() => setActivePlayerId(player.id)}>
-                    <Text style={styles.playerRank}>{index + 1}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.playerName}>{player.displayName}</Text>
-                      <Text style={styles.playerMeta}>
-                        {player.position || "igrac"}
-                        {player.shirtNumber ? ` - ${player.shirtNumber}` : ""} - {player.appearances} mec.  {player.goals} gol.  {player.assists} as.
-                      </Text>
-                    </View>
-                    <Text style={styles.playerPoints}>{player.fantasyPoints}</Text>
-                  </TouchableOpacity>
-                ))}
+                <Card style={styles.rosterCard}>
+                  {profile.players.length === 0 ? <EmptyState message="Nema igraca u bazi." /> : null}
+                  {profile.players.map((player, index) => (
+                    <TouchableOpacity
+                      key={player.id}
+                      style={[styles.playerRow, index > 0 ? styles.playerRowDivider : null]}
+                      onPress={() => setActivePlayerId(player.id)}
+                    >
+                      <RosterAvatar avatarUrl={player.avatarUrl} displayName={player.displayName} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.playerName}>{player.displayName}</Text>
+                        <Text style={styles.playerMeta}>
+                          {player.shirtNumber ? `#${player.shirtNumber} - ` : ""}
+                          {player.appearances} mec.  {player.goals} gol.  {player.assists} as.
+                        </Text>
+                      </View>
+                      {player.position ? (
+                        <View style={styles.positionPill}>
+                          <Text style={styles.positionPillText}>{POSITION_LABEL[player.position] || player.position}</Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.playerPoints}>{player.fantasyPoints}</Text>
+                      {isAdmin ? (
+                        <TouchableOpacity
+                          style={styles.removePlayerButton}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            handleRemovePlayer(player.id);
+                          }}
+                        >
+                          <Ionicons name="close" size={14} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </Card>
               </View>
 
               <View>
-                <Text style={styles.sectionLabel}>Rezultati</Text>
-                {profile.matches.length === 0 ? <EmptyState message="Jos nema odigranih utakmica." /> : null}
-                {profile.matches.slice(0, 10).map((match) => {
-                  const played = match.status === "finished" || match.homeScore || match.awayScore;
-                  const result = played ? resultFor(match, profile.id) : null;
-                  return (
-                    <View key={match.id} style={styles.matchRow}>
-                      {result ? (
-                        <View style={[styles.matchResultTag, { backgroundColor: RESULT_TONE[result].bg }]}>
-                          <Text style={[styles.matchResultTagText, { color: RESULT_TONE[result].fg }]}>{RESULT_LABEL[result]}</Text>
+                <SectionHeader icon="list-outline" label="Rezultati" />
+                <Card style={styles.matchesCard}>
+                  {profile.matches.length === 0 ? <EmptyState message="Jos nema odigranih utakmica." /> : null}
+                  {profile.matches.slice(0, 10).map((match, index) => {
+                    const played = match.status === "finished" || match.homeScore || match.awayScore;
+                    const result = played ? resultFor(match, profile.id) : null;
+                    return (
+                      <TouchableOpacity
+                        key={match.id}
+                        style={[styles.matchRow, index > 0 ? styles.matchRowDivider : null]}
+                        onPress={() => setActiveMatchId(match.id)}
+                      >
+                        {result ? (
+                          <View style={[styles.matchResultTag, { backgroundColor: RESULT_TONE[result].bg }]}>
+                            <Text style={[styles.matchResultTagText, { color: RESULT_TONE[result].fg }]}>{RESULT_LABEL[result]}</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.matchResultTagEmpty} />
+                        )}
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.matchTeams} numberOfLines={1}>
+                            {match.homeTeamName} {match.homeScore} : {match.awayScore} {match.awayTeamName}
+                          </Text>
+                          <Text style={styles.matchMeta}>
+                            {formatDateTime(match.scheduledAt)}{match.round ? ` - Kolo ${match.round}` : ""}
+                          </Text>
                         </View>
-                      ) : (
-                        <View style={styles.matchResultTagEmpty} />
-                      )}
-                      <Text style={styles.matchTeams} numberOfLines={1}>
-                        {match.homeTeamName} {match.homeScore} : {match.awayScore} {match.awayTeamName}
-                      </Text>
-                    </View>
-                  );
-                })}
+                        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </Card>
               </View>
+
+              <SponsorStrip />
             </View>
           </ScrollView>
         ) : null}
 
         {activePlayerId ? <PlayerProfileModal playerId={activePlayerId} onClose={() => setActivePlayerId(null)} /> : null}
+        {activeMatchId ? <MatchDetailModal matchId={activeMatchId} onClose={() => setActiveMatchId(null)} /> : null}
+        {siblingTeamId ? <TeamProfileModal teamId={siblingTeamId} onClose={() => setSiblingTeamId(null)} /> : null}
 
         {showAddPlayer ? (
           <PlayerEditorModal
@@ -250,6 +364,17 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
             onClose={() => setShowAddPlayer(false)}
             onSaved={() => {
               setShowAddPlayer(false);
+              load();
+            }}
+          />
+        ) : null}
+
+        {showEditTeam && profile ? (
+          <TeamEditorModal
+            team={{ id: profile.id, name: profile.name, shortName: profile.shortName, logoUrl: profile.logoUrl }}
+            onClose={() => setShowEditTeam(false)}
+            onSaved={() => {
+              setShowEditTeam(false);
               load();
             }}
           />
@@ -264,6 +389,15 @@ function StatTile({ label, value, display }: { label: string; value: number; dis
     <View style={styles.statTile}>
       <Text style={styles.statTileValue}>{display ?? value}</Text>
       <Text style={styles.statTileLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SectionHeader({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <Ionicons name={icon} size={15} color={colors.purple} />
+      <Text style={styles.sectionLabel}>{label}</Text>
     </View>
   );
 }
@@ -290,6 +424,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
+  iconButtonSpacer: { width: 36, height: 36 },
   heroBadgeText: { color: "rgba(255,255,255,0.85)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
   crestPhoto: {
     width: 84,
@@ -330,7 +465,8 @@ const styles = StyleSheet.create({
   },
   statTileValue: { color: colors.purple, fontSize: 17, fontWeight: "900" },
   statTileLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", marginTop: 2, textAlign: "center" },
-  sectionLabel: { color: colors.ink, fontWeight: "900", fontSize: 15, marginBottom: 10 },
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
+  sectionLabel: { color: colors.ink, fontWeight: "900", fontSize: 15 },
   nextMatchCard: { gap: 8 },
   nextMatchRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   nextMatchTeams: { color: colors.ink, fontWeight: "800", fontSize: 14 },
@@ -344,33 +480,64 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   formChipText: { fontWeight: "900", fontSize: 14 },
-  standingRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
+  teamsCard: { gap: 0 },
+  teamRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
+  teamRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  teamRowName: { color: colors.ink, fontWeight: "800", fontSize: 14 },
+  teamRowMeta: { color: colors.textMuted, fontSize: 12, fontWeight: "600", marginTop: 2 },
+  standingsCard: { gap: 0 },
+  standingRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10 },
+  standingRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
   standingRowName: { color: colors.ink, fontWeight: "800", fontSize: 14 },
   standingRowMeta: { color: colors.textMuted, fontSize: 12, fontWeight: "600", marginTop: 2 },
   standingRowPoints: { color: colors.purple, fontWeight: "900", fontSize: 16 },
   rosterHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  rosterCard: { gap: 0 },
+  addButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.ink,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginBottom: 10
+  },
+  addButtonText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   playerRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
     paddingVertical: 10
   },
-  playerRank: { color: colors.textMuted, fontWeight: "800", fontSize: 12, width: 18, textAlign: "center" },
+  playerRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
+  playerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.surfaceMuted },
+  playerAvatarFallback: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  playerAvatarFallbackText: { color: colors.purple, fontWeight: "800", fontSize: 13 },
   playerName: { color: colors.textPrimary, fontWeight: "700" },
   playerMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  playerPoints: { color: colors.purple, fontWeight: "900", fontSize: 16 },
+  positionPill: { backgroundColor: colors.surfaceMuted, borderRadius: 8, paddingVertical: 3, paddingHorizontal: 6 },
+  positionPillText: { color: colors.textMuted, fontWeight: "800", fontSize: 10 },
+  playerPoints: { color: colors.purple, fontWeight: "900", fontSize: 16, minWidth: 26, textAlign: "right" },
+  removePlayerButton: { padding: 6, marginLeft: 2 },
+  matchesCard: { gap: 0 },
   matchRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    paddingVertical: 9
+    paddingVertical: 10
   },
+  matchRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
   matchResultTag: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   matchResultTagEmpty: { width: 22, height: 22 },
   matchResultTagText: { fontWeight: "900", fontSize: 11 },
-  matchTeams: { color: colors.textPrimary, fontWeight: "600", flex: 1 }
+  matchTeams: { color: colors.textPrimary, fontWeight: "600" },
+  matchMeta: { color: colors.textMuted, fontSize: 11, fontWeight: "600", marginTop: 2 }
 });

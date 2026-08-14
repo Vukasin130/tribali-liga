@@ -3,6 +3,8 @@ import { Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View 
 import { createMatch } from "../api/endpoints";
 import type { MatchDetail, Team } from "../api/types";
 import { colors } from "../theme/colors";
+import { wideContent } from "../theme/layout";
+import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
 
 function pad(value: number): string {
@@ -36,6 +38,7 @@ export function MatchComposerModal({
   const [venue, setVenue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const isWide = useIsWideScreen();
 
   async function handleSave() {
     if (!homeTeamId || !awayTeamId) {
@@ -72,7 +75,7 @@ export function MatchComposerModal({
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View style={styles.screen}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView contentContainerStyle={[styles.content, isWide ? wideContent : null]}>
           <Text style={styles.title}>Zakazi utakmicu</Text>
 
           <View style={styles.field}>
