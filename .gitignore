@@ -9,6 +9,7 @@ apps/*/.env
 
 # Build output
 apps/admin/dist/
+apps/desktop/dist/
 apps/mobile/dist/
 apps/mobile/web-build/
 .expo/
