@@ -19,6 +19,13 @@ import { TeamCrest } from "../components/TeamCrest";
 
 const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Odbrana", napad: "Napad" };
 
+type Tab = "profil" | "stats" | "utakmice";
+const TABS: { key: Tab; label: string }[] = [
+  { key: "profil", label: "Profil" },
+  { key: "stats", label: "Stats" },
+  { key: "utakmice", label: "Utakmice" }
+];
+
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
   return parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
@@ -39,12 +46,14 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   const [showEditor, setShowEditor] = useState(false);
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [tab, setTab] = useState<Tab>("profil");
   const isWide = useIsWideScreen();
 
   function load() {
     setLoading(true);
     setError("");
     setPhotoFailed(false);
+    setTab("profil");
     fetchPlayerProfile(playerId)
       .then(setProfile)
       .catch((err) => setError(err instanceof Error ? err.message : "Ne mogu da ucitam igraca."))
@@ -57,6 +66,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   const positionGroup = positionGroupOf(profile?.position || "");
   const isGoalkeeper = positionGroup === "golman";
   const gradient = isGoalkeeper ? (["#4a3a14", "#141414"] as const) : kitGradientForTeam(primaryTeam?.teamId || "");
+  const topSeason = profile?.seasonStats[0];
 
   const bestGame = useMemo(() => {
     if (!profile || profile.matchStats.length === 0) return 0;
@@ -90,152 +100,169 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
               <LinearGradient colors={gradients.hero} style={[styles.hero, isWide ? styles.heroWide : null]}>
                 <View style={styles.heroTopRow}>
                   <TouchableOpacity style={styles.iconButton} onPress={onClose}>
-                  <Ionicons name="chevron-back" size={20} color="#fff" />
-                </TouchableOpacity>
-                <Text style={styles.heroBadgeText}>Profil igraca</Text>
-                {isAdmin ? (
-                  <TouchableOpacity style={styles.iconButton} onPress={() => setShowEditor(true)}>
-                    <Ionicons name="create-outline" size={18} color="#fff" />
+                    <Ionicons name="chevron-back" size={20} color="#fff" />
                   </TouchableOpacity>
-                ) : (
-                  <View style={styles.iconButtonSpacer} />
-                )}
-              </View>
-
-              {profile.avatarUrl && !photoFailed ? (
-                <Image
-                  source={{ uri: profile.avatarUrl }}
-                  style={styles.portraitPhoto}
-                  resizeMode="cover"
-                  onError={() => setPhotoFailed(true)}
-                />
-              ) : (
-                <LinearGradient colors={gradient} style={styles.portraitFallback}>
-                  <Text style={styles.portraitInitials}>{initialsOf(profile.displayName)}</Text>
-                </LinearGradient>
-              )}
-
-              <Text style={styles.name}>{profile.displayName}</Text>
-              <Text style={styles.teamLine}>
-                {primaryTeam?.teamName || "Bez ekipe"}
-                {profile.position ? ` - ${POSITION_LABELS[positionGroup] || profile.position}` : ""}
-                {profile.shirtNumber ? ` - broj ${profile.shirtNumber}` : ""}
-              </Text>
-            </LinearGradient>
-
-            <View style={styles.body}>
-              <Card style={styles.scoreCard}>
-                <View style={styles.scoreRow}>
-                  <View style={styles.scoreMain}>
-                    <Text style={styles.scoreValue}>{profile.seasonStats[0]?.fantasyPoints ?? 0}</Text>
-                    <Text style={styles.scoreLabel}>fantasy poena</Text>
-                  </View>
-                  <View style={styles.scoreDivider} />
-                  <View style={styles.scoreMain}>
-                    <Text style={styles.scoreValue}>{profile.seasonStats[0]?.appearances ?? 0}</Text>
-                    <Text style={styles.scoreLabel}>utakmica</Text>
-                  </View>
+                  <Text style={styles.heroBadgeText}>Profil igraca</Text>
+                  {isAdmin ? (
+                    <TouchableOpacity style={styles.iconButton} onPress={() => setShowEditor(true)}>
+                      <Ionicons name="create-outline" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={styles.iconButtonSpacer} />
+                  )}
                 </View>
 
-                <View style={styles.statGrid}>
-                  <StatTile label="golovi" value={profile.seasonStats[0]?.goals ?? 0} />
-                  <StatTile label="asistencije" value={profile.seasonStats[0]?.assists ?? 0} />
-                  <StatTile
-                    label={isGoalkeeper ? "odbrane" : "najbolja utakmica"}
-                    value={isGoalkeeper ? profile.seasonStats[0]?.saves ?? 0 : bestGame}
+                {profile.avatarUrl && !photoFailed ? (
+                  <Image
+                    source={{ uri: profile.avatarUrl }}
+                    style={styles.portraitPhoto}
+                    resizeMode="cover"
+                    onError={() => setPhotoFailed(true)}
                   />
+                ) : (
+                  <LinearGradient colors={gradient} style={styles.portraitFallback}>
+                    <Text style={styles.portraitInitials}>{initialsOf(profile.displayName)}</Text>
+                  </LinearGradient>
+                )}
+
+                <Text style={styles.name}>{profile.displayName}</Text>
+                <Text style={styles.teamLine}>
+                  {primaryTeam?.teamName || "Bez ekipe"}
+                  {profile.position ? ` - ${POSITION_LABELS[positionGroup] || profile.position}` : ""}
+                  {profile.shirtNumber ? ` - broj ${profile.shirtNumber}` : ""}
+                </Text>
+
+                <View style={styles.pointsBadge}>
+                  <Ionicons name="star" size={14} color={colors.ink} />
+                  <Text style={styles.pointsBadgeText}>{topSeason?.fantasyPoints ?? 0} fantasy poena</Text>
                 </View>
-              </Card>
+              </LinearGradient>
 
-              {profile.nextMatch ? (
-                <Card style={styles.nextMatchCard}>
-                  <Text style={styles.sectionLabel}>Naredna utakmica</Text>
-                  <View style={styles.nextMatchRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.nextMatchTeams}>
-                        {profile.nextMatch.homeTeamName} vs {profile.nextMatch.awayTeamName}
-                      </Text>
-                      <Text style={styles.nextMatchMeta}>
-                        {formatDateTime(profile.nextMatch.scheduledAt)}
-                        {profile.nextMatch.venue ? ` - ${profile.nextMatch.venue}` : ""}
-                      </Text>
-                    </View>
-                    <Pill label="?" tone="neutral" />
-                  </View>
-                </Card>
-              ) : null}
-
-              {form.length > 0 ? (
-                <View>
-                  <Text style={styles.sectionLabel}>Forma (poslednjih 5)</Text>
-                  <View style={styles.formTrack}>
-                    {form.map((match, index) => (
-                      <View key={match.matchId} style={styles.formRound}>
-                        <Text style={styles.formRoundValue}>{match.fantasyPoints}</Text>
-                        <Text style={styles.formRoundLabel}>K{index + 1}</Text>
-                      </View>
-                    ))}
-                  </View>
+              <View style={styles.body}>
+                <View style={styles.quickStatGrid}>
+                  <QuickStat icon="calendar-outline" label="utakmica" value={topSeason?.appearances ?? 0} />
+                  <QuickStat icon="football" label="golovi" value={topSeason?.goals ?? 0} />
+                  <QuickStat icon="hand-right-outline" label="asistencije" value={topSeason?.assists ?? 0} />
+                  {isGoalkeeper ? (
+                    <QuickStat icon="shield-checkmark-outline" label="odbrane" value={topSeason?.saves ?? 0} />
+                  ) : (
+                    <QuickStat icon="star-outline" label="najbolja utak." value={bestGame} />
+                  )}
                 </View>
-              ) : null}
 
-              {profile.teams.length > 1 ? (
-                <View>
-                  <Text style={styles.sectionLabel}>Timovi</Text>
-                  <Card style={styles.teamsCard}>
-                    {profile.teams.map((team, index) => (
-                      <TouchableOpacity
-                        key={team.teamId}
-                        style={[styles.teamRow, index > 0 ? styles.teamRowDivider : null]}
-                        onPress={() => setActiveTeamId(team.teamId)}
-                      >
-                        <TeamCrest teamId={team.teamId} name={team.teamName} size={30} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.teamRowName}>{team.teamName}</Text>
-                          <Text style={styles.teamRowMeta}>{team.competitionName}{team.seasonName ? ` - ${team.seasonName}` : ""}</Text>
+                <View style={styles.tabBar}>
+                  {TABS.map((t) => (
+                    <TouchableOpacity
+                      key={t.key}
+                      style={[styles.tabButton, tab === t.key ? styles.tabButtonActive : null]}
+                      onPress={() => setTab(t.key)}
+                    >
+                      <Text style={[styles.tabButtonText, tab === t.key ? styles.tabButtonTextActive : null]}>{t.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {tab === "profil" ? (
+                  <View style={styles.section}>
+                    {profile.nextMatch ? (
+                      <Card style={styles.nextMatchCard}>
+                        <Text style={styles.sectionLabel}>Naredna utakmica</Text>
+                        <View style={styles.nextMatchRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.nextMatchTeams}>
+                              {profile.nextMatch.homeTeamName} vs {profile.nextMatch.awayTeamName}
+                            </Text>
+                            <Text style={styles.nextMatchMeta}>
+                              {formatDateTime(profile.nextMatch.scheduledAt)}
+                              {profile.nextMatch.venue ? ` - ${profile.nextMatch.venue}` : ""}
+                            </Text>
+                          </View>
+                          <Pill label="?" tone="neutral" />
                         </View>
-                        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-                      </TouchableOpacity>
-                    ))}
-                  </Card>
-                </View>
-              ) : null}
+                      </Card>
+                    ) : (
+                      <EmptyState message="Nema zakazane naredne utakmice." />
+                    )}
 
-              <View>
-                <Text style={styles.sectionLabel}>Takmicenja</Text>
-                {profile.seasonStats.length === 0 ? <EmptyState message="Jos nema statistike." /> : null}
-                {profile.seasonStats.map((stat) => (
-                  <Card key={`${stat.competitionId}-${stat.teamId}`} style={styles.seasonRow}>
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.seasonRowTitle}>
-                        <Text style={styles.seasonRowName}>{stat.competitionName}</Text>
-                        {activeCompetitionIds.has(stat.competitionId) ? <Pill label="Aktivna" tone="success" /> : null}
+                    {profile.teams.length > 0 ? (
+                      <View>
+                        <Text style={styles.sectionLabel}>{profile.teams.length > 1 ? "Timovi" : "Tim"}</Text>
+                        <Card style={styles.teamsCard}>
+                          {profile.teams.map((team, index) => (
+                            <TouchableOpacity
+                              key={team.teamId}
+                              style={[styles.teamRow, index > 0 ? styles.teamRowDivider : null]}
+                              onPress={() => setActiveTeamId(team.teamId)}
+                            >
+                              <TeamCrest teamId={team.teamId} name={team.teamName} size={30} />
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.teamRowName}>{team.teamName}</Text>
+                                <Text style={styles.teamRowMeta}>{team.competitionName}{team.seasonName ? ` - ${team.seasonName}` : ""}</Text>
+                              </View>
+                              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                            </TouchableOpacity>
+                          ))}
+                        </Card>
                       </View>
-                      <Text style={styles.seasonRowMeta}>
-                        {stat.teamName} - {stat.appearances} mec.  {stat.goals} gol.  {stat.assists} as.
-                      </Text>
-                    </View>
-                    <Text style={styles.seasonRowPoints}>{stat.fantasyPoints}</Text>
-                  </Card>
-                ))}
-              </View>
-
-              <View>
-                <Text style={styles.sectionLabel}>Poslednji mecevi</Text>
-                {profile.matchStats.length === 0 ? <EmptyState message="Jos nema odigranih meceva." /> : null}
-                {profile.matchStats.slice(0, 8).map((match: PlayerMatchStat) => (
-                  <View key={match.matchId} style={styles.matchRow}>
-                    <Text style={styles.matchTeams} numberOfLines={1}>
-                      {match.homeTeamName} {match.score} {match.awayTeamName}
-                    </Text>
-                    <Text style={styles.matchPoints}>{match.fantasyPoints} pts</Text>
+                    ) : null}
                   </View>
-                ))}
-              </View>
+                ) : null}
 
-              <SponsorStrip />
-            </View>
-          </ScrollView>
+                {tab === "stats" ? (
+                  <View style={styles.section}>
+                    {form.length > 0 ? (
+                      <View>
+                        <Text style={styles.sectionLabel}>Forma (poslednjih 5)</Text>
+                        <View style={styles.formTrack}>
+                          {form.map((match, index) => (
+                            <View key={match.matchId} style={styles.formRound}>
+                              <Text style={styles.formRoundValue}>{match.fantasyPoints}</Text>
+                              <Text style={styles.formRoundLabel}>K{index + 1}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    ) : null}
+
+                    <View>
+                      <Text style={styles.sectionLabel}>Takmicenja</Text>
+                      {profile.seasonStats.length === 0 ? <EmptyState message="Jos nema statistike." /> : null}
+                      {profile.seasonStats.map((stat) => (
+                        <Card key={`${stat.competitionId}-${stat.teamId}`} style={styles.seasonRow}>
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.seasonRowTitle}>
+                              <Text style={styles.seasonRowName}>{stat.competitionName}</Text>
+                              {activeCompetitionIds.has(stat.competitionId) ? <Pill label="Aktivna" tone="success" /> : null}
+                            </View>
+                            <Text style={styles.seasonRowMeta}>
+                              {stat.teamName} - {stat.appearances} mec.  {stat.goals} gol.  {stat.assists} as.
+                            </Text>
+                          </View>
+                          <Text style={styles.seasonRowPoints}>{stat.fantasyPoints}</Text>
+                        </Card>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                {tab === "utakmice" ? (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionLabel}>Poslednji mecevi</Text>
+                    {profile.matchStats.length === 0 ? <EmptyState message="Jos nema odigranih meceva." /> : null}
+                    {profile.matchStats.slice(0, 8).map((match: PlayerMatchStat) => (
+                      <View key={match.matchId} style={styles.matchRow}>
+                        <Text style={styles.matchTeams} numberOfLines={1}>
+                          {match.homeTeamName} {match.score} {match.awayTeamName}
+                        </Text>
+                        <Text style={styles.matchPoints}>{match.fantasyPoints} pts</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <SponsorStrip />
+              </View>
+            </ScrollView>
           ) : null}
         </View>
         {isWide ? <SponsorSideRail /> : null}
@@ -263,11 +290,12 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   );
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+function QuickStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: number }) {
   return (
-    <View style={styles.statTile}>
-      <Text style={styles.statTileValue}>{value}</Text>
-      <Text style={styles.statTileLabel}>{label}</Text>
+    <View style={styles.quickStatTile}>
+      <Ionicons name={icon} size={18} color={colors.purple} />
+      <Text style={styles.quickStatValue}>{value}</Text>
+      <Text style={styles.quickStatLabel}>{label}</Text>
     </View>
   );
 }
@@ -280,7 +308,7 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 60 },
   hero: {
     paddingTop: 54,
-    paddingBottom: 22,
+    paddingBottom: 26,
     paddingHorizontal: 20,
     alignItems: "center",
     borderBottomLeftRadius: 32,
@@ -291,7 +319,7 @@ const styles = StyleSheet.create({
   // sitting lower under the phone-sized top padding meant for a status bar clearance
   // that a desktop browser window doesn't have.
   heroWide: { paddingTop: 24 },
-  heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 14 },
+  heroTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", width: "100%", marginBottom: 18 },
   iconButton: {
     width: 36,
     height: 36,
@@ -302,45 +330,68 @@ const styles = StyleSheet.create({
   },
   iconButtonSpacer: { width: 36, height: 36 },
   heroBadgeText: { color: "rgba(255,255,255,0.85)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
+  // Much bigger than a small avatar badge - a rounded square (not a tight circle) so
+  // a real headshot crops safely via resizeMode="cover" without losing the face.
   portraitPhoto: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: 168,
+    height: 168,
+    borderRadius: 28,
     borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.5)",
-    marginBottom: 12,
+    borderColor: "rgba(255,255,255,0.45)",
+    marginBottom: 16,
     backgroundColor: "rgba(255,255,255,0.15)"
   },
   portraitFallback: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: 168,
+    height: 168,
+    borderRadius: 28,
     borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.5)",
-    marginBottom: 12,
+    borderColor: "rgba(255,255,255,0.45)",
+    marginBottom: 16,
     alignItems: "center",
     justifyContent: "center"
   },
-  portraitInitials: { color: "#fff", fontSize: 28, fontWeight: "800" },
-  name: { color: "#fff", fontSize: 24, fontWeight: "900", textAlign: "center" },
+  portraitInitials: { color: "#fff", fontSize: 46, fontWeight: "800" },
+  name: { color: "#fff", fontSize: 30, fontWeight: "900", textAlign: "center" },
   teamLine: { color: "rgba(255,255,255,0.82)", fontWeight: "700", marginTop: 4, textAlign: "center" },
-  body: { padding: 20, paddingTop: 16, gap: 18 },
-  scoreCard: { gap: 14 },
-  scoreRow: { flexDirection: "row", alignItems: "center" },
-  scoreMain: { flex: 1, alignItems: "center" },
-  scoreDivider: { width: 1, height: 40, backgroundColor: colors.line },
-  scoreValue: { color: colors.ink, fontSize: 30, fontWeight: "900" },
-  scoreLabel: { color: colors.textMuted, fontWeight: "700", fontSize: 12, marginTop: 2 },
-  statGrid: { flexDirection: "row", gap: 10 },
-  statTile: {
+  pointsBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#fff",
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    marginTop: 14
+  },
+  pointsBadgeText: { color: colors.ink, fontWeight: "800", fontSize: 12 },
+  body: { padding: 20, paddingTop: 18, gap: 18 },
+  quickStatGrid: { flexDirection: "row", gap: 10 },
+  quickStatTile: {
     flex: 1,
     alignItems: "center",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 14,
-    paddingVertical: 10
+    gap: 4,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: 16,
+    paddingVertical: 14
   },
-  statTileValue: { color: colors.purple, fontSize: 18, fontWeight: "900" },
-  statTileLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700", marginTop: 2, textAlign: "center" },
+  quickStatValue: { color: colors.ink, fontSize: 20, fontWeight: "900" },
+  quickStatLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", textAlign: "center" },
+  tabBar: { flexDirection: "row", gap: 8 },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceMuted
+  },
+  tabButtonActive: { backgroundColor: colors.ink },
+  tabButtonText: { color: colors.textMuted, fontWeight: "700", fontSize: 13 },
+  tabButtonTextActive: { color: "#fff" },
+  section: { gap: 18 },
   sectionLabel: { color: colors.ink, fontWeight: "900", fontSize: 15, marginBottom: 10 },
   nextMatchCard: { gap: 8 },
   nextMatchRow: { flexDirection: "row", alignItems: "center", gap: 10 },
