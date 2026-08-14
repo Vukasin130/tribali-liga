@@ -152,8 +152,31 @@ export async function createFantasySeason(payload: CreateSeasonPayload, actor: A
   return getFantasySeason(seasonId);
 }
 
+// Mirrors the admin screen's own readiness checklist (leagues linked, at least one
+// available player) - enforced here too, not just in the UI, so activating an unready
+// season is never just one API call away regardless of what admin screen (or bug in
+// one) is making that call. Deliberately does NOT require gameweeks to already exist:
+// since the gameweek sweep only ever generates rounds for an already-active season
+// (see runFantasyGameweekSweep), requiring them here first would make activation
+// permanently impossible - rounds are a consequence of activating, not a precondition.
+async function assertSeasonReadyToActivate(seasonId: string): Promise<void> {
+  const competitions = await query(
+    "select competition_id from public.fantasy_season_competitions where fantasy_season_id = $1",
+    [seasonId]
+  );
+  const competitionIds = competitions.rows.map((row) => row.competition_id);
+  if (!competitionIds.length) throw httpError(400, "Sezona nema povezanu nijednu ligu - to mora biti reseno pre pokretanja.");
+
+  const pool = await query(
+    "select count(*)::int as n from public.fantasy_player_pool where competition_id = any($1::uuid[]) and is_available = true",
+    [competitionIds]
+  );
+  if (!pool.rows[0]?.n) throw httpError(400, "Nijedan igrac nije prihvacen u fantasy bazi - sinhronizuj i prihvati igrace pre pokretanja.");
+}
+
 export async function updateFantasySeason(seasonId: string, payload: CreateSeasonPayload & { competitionIds?: unknown }, actor: Actor) {
   await getSeasonRow(seasonId);
+  if (payload.status === "active") await assertSeasonReadyToActivate(seasonId);
   let competitionsChanged = false;
   await transaction(async (client) => {
     const allowed: string[] = [];

@@ -42,8 +42,6 @@ import { BENCH_SLOTS, POSITION_GROUP_LABELS, SLOT_LABELS, SLOT_POSITION, STARTER
 import { ManagerTeamModal } from "./ManagerTeamModal";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
-const SEASON_STATUSES = ["draft", "active", "finished"];
-
 const DEFAULT_BUDGET_CAP = 100;
 
 type Tab = "team" | "pool" | "leaderboard" | "admin";
@@ -97,6 +95,7 @@ export function FantasyScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [adminError, setAdminError] = useState("");
+  const [confirmingFinishSeason, setConfirmingFinishSeason] = useState(false);
   const [editingPriceId, setEditingPriceId] = useState("");
   const [priceDraft, setPriceDraft] = useState("");
   const [priceSaving, setPriceSaving] = useState(false);
@@ -280,6 +279,7 @@ export function FantasyScreen() {
     setAdminError("");
     try {
       await updateFantasySeason(season.id, { status });
+      setConfirmingFinishSeason(false);
       load();
     } catch (err) {
       setAdminError(err instanceof ApiError ? err.message : "Status sezone nije promenjen.");
@@ -531,9 +531,15 @@ export function FantasyScreen() {
   const activePickerPick = activePickerSlot ? pickFor(activePickerSlot) : null;
 
   const leaguesLinked = (season.competitions ?? []).length > 0;
-  const playersSynced = pool.length > 0;
+  // Matches the backend's own activation guard (assertSeasonReadyToActivate) - at
+  // least one player actually accepted into the pool, not just synced-but-untouched.
+  const playersSynced = acceptedPoolCount > 0;
+  // Deliberately NOT part of allReady: gameweeks only ever get generated for an
+  // already-active season (see runFantasyGameweekSweep), so requiring them before
+  // activation would make "Pokreni sezonu" permanently unclickable. They're purely
+  // informational here - a consequence of activating, not a precondition for it.
   const gameweeksReady = (season.gameweeks ?? []).length > 0;
-  const allReady = leaguesLinked && playersSynced && gameweeksReady;
+  const allReady = leaguesLinked && playersSynced;
 
   return (
     <View style={styles.screen}>
@@ -943,6 +949,31 @@ export function FantasyScreen() {
         {tab === "admin" && isAdmin && isWide ? (
           <View style={[styles.section, isWide ? styles.adminGridWide : null]}>
             <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
+              <SectionTitle eyebrow={season.name} title="Podesavanja sezone" />
+              <View style={styles.chipsRow}>
+                {(season.competitions ?? []).map((competition) => (
+                  <Pill key={competition.id} label={`${competition.cityName ? competition.cityName + " - " : ""}${competition.name}`} />
+                ))}
+              </View>
+
+              <View style={styles.adminButtonsRow}>
+                <TouchableOpacity style={styles.adminActionButton} onPress={() => setEditSeasonComposer(true)}>
+                  <Text style={styles.adminActionButtonText}>Izmeni lige</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.adminActionButtonPrimary, syncing ? styles.adminActionButtonDisabled : null]}
+                  onPress={handleSyncPool}
+                  disabled={syncing}
+                >
+                  <Text style={styles.adminActionButtonPrimaryText}>{syncing ? "Sinhronizujem..." : "Sinhronizuj fantasy bazu"}</Text>
+                </TouchableOpacity>
+              </View>
+
+              {adminError ? <Text style={styles.saveError}>{adminError}</Text> : null}
+              {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
+            </Card>
+
+            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
               <SectionTitle eyebrow="Pregled" title="Status sezone" />
               <View style={styles.statusDashboardBadgeRow}>
                 <Pill label={seasonStatusLabel(season.status)} tone={seasonStatusTone(season.status)} />
@@ -976,13 +1007,11 @@ export function FantasyScreen() {
                 </Text>
               </View>
               <View style={styles.checklistRow}>
-                <Ionicons
-                  name={gameweeksReady ? "checkmark-circle" : "ellipse-outline"}
-                  size={20}
-                  color={gameweeksReady ? colors.success : colors.textMuted}
-                />
+                <Ionicons name="information-circle-outline" size={20} color={colors.textMuted} />
                 <Text style={styles.checklistText}>
-                  Fantasy kola generisana: {(season.gameweeks ?? []).length}
+                  {gameweeksReady
+                    ? `Fantasy kola generisana: ${(season.gameweeks ?? []).length}`
+                    : "Fantasy kola: pojavljuju se automatski nakon pokretanja sezone"}
                 </Text>
               </View>
 
@@ -994,75 +1023,28 @@ export function FantasyScreen() {
                 >
                   <Text style={styles.adminActionButtonPrimaryText}>Pokreni sezonu</Text>
                 </TouchableOpacity>
+              ) : confirmingFinishSeason ? (
+                <View style={styles.deleteConfirmBox}>
+                  <Text style={styles.deleteConfirmText}>
+                    Zavrsiti sezonu "{season.name}"? Korisnici vise nece moci da menjaju timove - tabela i rezultati ostaju vidljivi.
+                  </Text>
+                  <View style={styles.deleteConfirmRow}>
+                    <TouchableOpacity style={styles.deleteConfirmCancel} onPress={() => setConfirmingFinishSeason(false)}>
+                      <Text style={styles.adminActionButtonText}>Otkazi</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.deleteConfirmButton} onPress={() => handleSeasonStatusChange("finished")}>
+                      <Text style={styles.adminActionButtonPrimaryText}>Da, zavrsi sezonu</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               ) : (
-                <TouchableOpacity style={styles.adminActionButton} onPress={() => handleSeasonStatusChange("finished")}>
+                <TouchableOpacity style={styles.adminActionButton} onPress={() => setConfirmingFinishSeason(true)}>
                   <Text style={styles.adminActionButtonText}>Zavrsi sezonu</Text>
                 </TouchableOpacity>
               )}
               {!allReady && season.status !== "active" ? (
                 <Text style={styles.adminCardHint}>Zavrsi sve korake iznad da bi mogao da pokrenes sezonu.</Text>
               ) : null}
-            </Card>
-
-            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
-              <SectionTitle eyebrow="Admin" title="Fantasy sezone" />
-              {allSeasons.length > 1 ? (
-                <View style={styles.chipsRow}>
-                  {allSeasons.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.seasonChip, item.id === season.id ? styles.seasonChipActive : null]}
-                      onPress={() => setSelectedSeasonId(item.id)}
-                    >
-                      <Text style={[styles.seasonChipText, item.id === season.id ? styles.seasonChipTextActive : null]}>
-                        {item.name}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              ) : null}
-              <TouchableOpacity style={styles.adminActionButton} onPress={() => setShowSeasonComposer(true)}>
-                <Text style={styles.adminActionButtonText}>Nova fantasy sezona</Text>
-              </TouchableOpacity>
-            </Card>
-
-            <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
-              <SectionTitle eyebrow={season.name} title="Podesavanja sezone" />
-              <View style={styles.chipsRow}>
-                {SEASON_STATUSES.map((status) => (
-                  <TouchableOpacity
-                    key={status}
-                    style={[styles.statusChip, season.status === status ? styles.statusChipActive : null]}
-                    onPress={() => handleSeasonStatusChange(status)}
-                  >
-                    <Text style={[styles.statusChipText, season.status === status ? styles.statusChipTextActive : null]}>
-                      {seasonStatusLabel(status)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <View style={styles.chipsRow}>
-                {(season.competitions ?? []).map((competition) => (
-                  <Pill key={competition.id} label={`${competition.cityName ? competition.cityName + " - " : ""}${competition.name}`} />
-                ))}
-              </View>
-
-              <View style={styles.adminButtonsRow}>
-                <TouchableOpacity style={styles.adminActionButton} onPress={() => setEditSeasonComposer(true)}>
-                  <Text style={styles.adminActionButtonText}>Izmeni lige</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.adminActionButtonPrimary, syncing ? styles.adminActionButtonDisabled : null]}
-                  onPress={handleSyncPool}
-                  disabled={syncing}
-                >
-                  <Text style={styles.adminActionButtonPrimaryText}>{syncing ? "Sinhronizujem..." : "Sinhronizuj fantasy bazu"}</Text>
-                </TouchableOpacity>
-              </View>
-
-              {adminError ? <Text style={styles.saveError}>{adminError}</Text> : null}
-              {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
             </Card>
 
             <Card style={[styles.adminCard, isWide ? styles.adminCardWide : null]}>
@@ -1082,6 +1064,28 @@ export function FantasyScreen() {
                   <Pill label={gameweekStatusLabel(gw.status)} tone={gameweekStatusTone(gw.status)} />
                 </View>
               ))}
+            </Card>
+
+            <Card style={[styles.adminCard, styles.adminCardCompact]}>
+              <SectionTitle eyebrow="Admin" title="Sve sezone" />
+              {allSeasons.length > 1 ? (
+                <View style={styles.chipsRow}>
+                  {allSeasons.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.seasonChip, item.id === season.id ? styles.seasonChipActive : null]}
+                      onPress={() => setSelectedSeasonId(item.id)}
+                    >
+                      <Text style={[styles.seasonChipText, item.id === season.id ? styles.seasonChipTextActive : null]}>
+                        {item.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
+              <TouchableOpacity style={styles.adminActionButton} onPress={() => setShowSeasonComposer(true)}>
+                <Text style={styles.adminActionButtonText}>Nova fantasy sezona</Text>
+              </TouchableOpacity>
             </Card>
           </View>
         ) : null}
@@ -1235,6 +1239,10 @@ const styles = StyleSheet.create({
   poolCardWide: { width: 380 },
   adminGridWide: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 16 },
   adminCardWide: { flexBasis: 420, flexGrow: 1 },
+  // Deliberately smaller than the other admin cards - switching seasons or creating a
+  // new one is a rare, secondary action next to the season you're actively running,
+  // and shouldn't visually compete with it for attention.
+  adminCardCompact: { flexBasis: 260, flexGrow: 0, width: 260 },
   statusRow: { flexDirection: "row", gap: 8 },
   statusPill: {
     flex: 1,
@@ -1435,17 +1443,6 @@ const styles = StyleSheet.create({
   seasonChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   seasonChipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 12 },
   seasonChipTextActive: { color: "#fff" },
-  statusChip: {
-    borderRadius: 999,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: colors.line
-  },
-  statusChipActive: { backgroundColor: colors.purple, borderColor: colors.purple },
-  statusChipText: { color: colors.textPrimary, fontWeight: "700", fontSize: 12 },
-  statusChipTextActive: { color: "#fff" },
   adminButtonsRow: { flexDirection: "row", gap: 8 },
   adminActionButton: {
     flex: 1,
@@ -1468,6 +1465,30 @@ const styles = StyleSheet.create({
   },
   adminActionButtonPrimaryText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   adminActionButtonDisabled: { opacity: 0.5 },
+  deleteConfirmBox: {
+    backgroundColor: "rgba(160,24,61,0.08)",
+    borderRadius: 14,
+    padding: 14,
+    gap: 10
+  },
+  deleteConfirmText: { color: colors.textPrimary, fontSize: 13, lineHeight: 18 },
+  deleteConfirmRow: { flexDirection: "row", gap: 10 },
+  deleteConfirmCancel: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceMuted
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: colors.danger
+  },
   syncMessage: { color: colors.purple, fontWeight: "700", fontSize: 12, textAlign: "center" },
   gwRow: {
     flexDirection: "row",
