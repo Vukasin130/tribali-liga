@@ -646,6 +646,9 @@ export interface PlayerProfile {
   seasonStats: PlayerSeasonStat[];
   matchStats: PlayerMatchStat[];
   nextMatch: PlayerNextMatch | null;
+  // Current fantasy price, only when this player is in an actually-active fantasy
+  // season's pool - null otherwise (not synced yet, or the season isn't live).
+  fantasyPrice: number | null;
 }
 
 export interface Sponsor {

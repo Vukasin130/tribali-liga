@@ -68,11 +68,6 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   const gradient = isGoalkeeper ? (["#4a3a14", "#141414"] as const) : kitGradientForTeam(primaryTeam?.teamId || "");
   const topSeason = profile?.seasonStats[0];
 
-  const bestGame = useMemo(() => {
-    if (!profile || profile.matchStats.length === 0) return 0;
-    return Math.max(...profile.matchStats.map((m) => m.fantasyPoints));
-  }, [profile]);
-
   const form = useMemo(() => {
     if (!profile) return [];
     return [...profile.matchStats].slice(0, 5).reverse();
@@ -140,14 +135,14 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
 
               <View style={styles.body}>
                 <View style={styles.quickStatGrid}>
-                  <QuickStat icon="calendar-outline" label="utakmica" value={topSeason?.appearances ?? 0} />
-                  <QuickStat icon="football" label="golovi" value={topSeason?.goals ?? 0} />
-                  <QuickStat icon="hand-right-outline" label="asistencije" value={topSeason?.assists ?? 0} />
-                  {isGoalkeeper ? (
-                    <QuickStat icon="shield-checkmark-outline" label="odbrane" value={topSeason?.saves ?? 0} />
-                  ) : (
-                    <QuickStat icon="star-outline" label="najbolja utak." value={bestGame} />
-                  )}
+                  <QuickStat icon="calendar-outline" label="utakmica" value={String(topSeason?.appearances ?? 0)} />
+                  <QuickStat icon="football" label="golovi" value={String(topSeason?.goals ?? 0)} />
+                  <QuickStat icon="footsteps-outline" label="asistencije" value={String(topSeason?.assists ?? 0)} />
+                  <QuickStat
+                    icon="pricetag-outline"
+                    label="cena"
+                    value={profile.fantasyPrice != null ? `${profile.fantasyPrice.toFixed(1)} CR` : "-"}
+                  />
                 </View>
 
                 <View style={styles.tabBar}>
@@ -290,11 +285,11 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   );
 }
 
-function QuickStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: number }) {
+function QuickStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
   return (
     <View style={styles.quickStatTile}>
       <Ionicons name={icon} size={18} color={colors.purple} />
-      <Text style={styles.quickStatValue}>{value}</Text>
+      <Text style={styles.quickStatValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
       <Text style={styles.quickStatLabel}>{label}</Text>
     </View>
   );

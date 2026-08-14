@@ -328,7 +328,7 @@ export async function getPlayerProfile(id: string) {
   );
   const activeTeamIds = teamIds.rows.map((row) => row.team_id);
 
-  const [teams, seasonStats, matchStats, nextMatch] = await Promise.all([
+  const [teams, seasonStats, matchStats, nextMatch, fantasyPrice] = await Promise.all([
     attachTeams([normalizePlayer(base.rows[0])]),
     query(
       `select s.*, c.name as competition_name, c.season_name, t.name as team_name
@@ -363,14 +363,29 @@ export async function getPlayerProfile(id: string) {
            limit 1`,
           [activeTeamIds]
         )
-      : Promise.resolve({ rows: [] as any[] })
+      : Promise.resolve({ rows: [] as any[] }),
+    // Only from an actually-active fantasy season's pool - a still-draft season's pool
+    // (or one this player was never synced into) shouldn't surface a price at all, so
+    // the profile can cleanly show "-" instead of a number that doesn't mean anything
+    // yet.
+    query(
+      `select fpp.current_price
+       from public.fantasy_player_pool fpp
+       join public.fantasy_season_competitions fsc on fsc.competition_id = fpp.competition_id
+       join public.fantasy_seasons fs on fs.id = fsc.fantasy_season_id
+       where fpp.player_id = $1 and fs.status = 'active'
+       order by fs.updated_at desc
+       limit 1`,
+      [id]
+    )
   ]);
 
   return {
     ...teams[0],
     seasonStats: seasonStats.rows.map(normalizePlayerSeasonStat),
     matchStats: matchStats.rows.map(normalizePlayerMatchStat),
-    nextMatch: nextMatch.rows[0] ? normalizeNextMatch(nextMatch.rows[0]) : null
+    nextMatch: nextMatch.rows[0] ? normalizeNextMatch(nextMatch.rows[0]) : null,
+    fantasyPrice: fantasyPrice.rows[0] ? Number(fantasyPrice.rows[0].current_price) : null
   };
 }
 
