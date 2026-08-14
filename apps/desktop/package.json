@@ -4,7 +4,8 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "web": "expo start --web --port 8082"
+    "web": "expo start --web --port 8082",
+    "build": "expo export --platform web"
   },
   "dependencies": {
     "@tribali-liga/mobile": "*",

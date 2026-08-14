@@ -8,7 +8,9 @@
   "scripts": {
     "mobile": "npm --workspace apps/mobile run start",
     "desktop": "npm --workspace apps/desktop run web",
+    "desktop:build": "npm --workspace apps/desktop run build",
     "api": "npm --workspace apps/api run dev",
+    "api:start": "npm --workspace apps/api run start",
     "db:schema": "node scripts/apply-supabase-schema.mjs",
     "db:import:wp": "node scripts/import-wordpress-history.mjs",
     "db:import:flm": "node scripts/import-flm-full-history.mjs",
@@ -19,6 +21,9 @@
     "db:prisma:migrate:status": "npm --workspace apps/api run db:migrate:status",
     "db:prisma:studio": "npm --workspace apps/api run db:studio",
     "check": "npm --workspace apps/mobile exec tsc -- --noEmit && npm --workspace apps/desktop exec tsc -- --noEmit"
+  },
+  "engines": {
+    "node": ">=22.6.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4"
