@@ -26,10 +26,8 @@ export function TeamComposerModal({
   const [clubs, setClubs] = useState<Club[]>([]);
   const [clubsLoading, setClubsLoading] = useState(!standalone);
   const [addingClubId, setAddingClubId] = useState("");
-  const [showNewForm, setShowNewForm] = useState(standalone);
   const [name, setName] = useState("");
   const [shortName, setShortName] = useState("");
-  const [groupName, setGroupName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const isWide = useIsWideScreen();
@@ -77,10 +75,8 @@ export function TeamComposerModal({
     setError("");
     try {
       const team = await createTeam({
-        competitionId,
         name: name.trim(),
-        shortName: shortName.trim() || undefined,
-        groupName: groupName.trim() || undefined
+        shortName: shortName.trim() || undefined
       });
       onSaved(team);
     } catch (err) {
@@ -117,7 +113,9 @@ export function TeamComposerModal({
                 <ActivityIndicator color={colors.purple} />
               ) : pickableClubs.length === 0 ? (
                 <Text style={styles.hint}>
-                  {clubs.length === 0 ? "Baza jos nema nijedan klub." : "Svi poznati klubovi su vec u ovoj ligi."}
+                  {clubs.length === 0
+                    ? "Baza jos nema nijedan klub - napravi ga iz Explore > Ekipe > Nova ekipa, pa se vrati ovde."
+                    : "Svi poznati klubovi su vec u ovoj ligi."}
                 </Text>
               ) : (
                 <View style={styles.clubList}>
@@ -141,18 +139,15 @@ export function TeamComposerModal({
                   ))}
                 </View>
               )}
+
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+
+              <Text style={styles.footerHint}>
+                Ne vidis klub koji trazis? Napravi ga iz Explore {"›"} Ekipe {"›"} Nova ekipa, pa se vrati ovde.
+              </Text>
             </>
-          ) : null}
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          {!showNewForm ? (
-            <TouchableOpacity style={styles.newTeamToggle} onPress={() => setShowNewForm(true)}>
-              <Text style={styles.newTeamToggleText}>+ Ovo je nova ekipa koje jos nema u bazi</Text>
-            </TouchableOpacity>
           ) : (
             <View style={styles.newForm}>
-              {!standalone ? <Text style={styles.label}>Nova ekipa</Text> : null}
               <TextInput
                 style={styles.input}
                 placeholder="Naziv ekipe"
@@ -167,15 +162,7 @@ export function TeamComposerModal({
                 value={shortName}
                 onChangeText={setShortName}
               />
-              {!standalone ? (
-                <TextInput
-                  style={styles.input}
-                  placeholder="Grupa (opciono)"
-                  placeholderTextColor="#9c9186"
-                  value={groupName}
-                  onChangeText={setGroupName}
-                />
-              ) : null}
+              {error ? <Text style={styles.error}>{error}</Text> : null}
               <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj novu ekipu"} onPress={handleSaveNew} loading={saving} />
             </View>
           )}
@@ -211,8 +198,7 @@ const styles = StyleSheet.create({
   clubName: { color: colors.textPrimary, fontWeight: "700", fontSize: 14 },
   clubMeta: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
   clubAddText: { color: colors.purple, fontWeight: "700", fontSize: 12 },
-  newTeamToggle: { paddingVertical: 10 },
-  newTeamToggleText: { color: colors.purple, fontWeight: "700", textAlign: "center" },
+  footerHint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: 4 },
   newForm: { gap: 12, backgroundColor: colors.surfaceMuted, borderRadius: 16, padding: 14 },
   input: {
     backgroundColor: "#fff",
