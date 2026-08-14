@@ -7,7 +7,6 @@ import { colors } from "../theme/colors";
 import { wideContent } from "../theme/layout";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { PrimaryButton } from "../components/ui";
-import { LogoBackgroundToggle } from "../components/LogoBackgroundToggle";
 
 export function SponsorEditorModal({
   sponsor,
@@ -22,7 +21,6 @@ export function SponsorEditorModal({
   const [subtitle, setSubtitle] = useState(sponsor?.subtitle ?? "");
   const [targetUrl, setTargetUrl] = useState(sponsor?.targetUrl ?? "");
   const [logoUrl, setLogoUrl] = useState(sponsor?.logoUrl ?? "");
-  const [logoBackground, setLogoBackground] = useState<"light" | "dark">(sponsor?.logoBackground === "dark" ? "dark" : "light");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -53,7 +51,7 @@ export function SponsorEditorModal({
     setSaving(true);
     setError("");
     try {
-      await updateSponsor({ id: sponsor?.id, title: title.trim(), subtitle: subtitle.trim(), logoUrl, targetUrl: targetUrl.trim(), isActive: true, logoBackground });
+      await updateSponsor({ id: sponsor?.id, title: title.trim(), subtitle: subtitle.trim(), logoUrl, targetUrl: targetUrl.trim(), isActive: true });
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sponzor nije sacuvan.");
@@ -75,7 +73,7 @@ export function SponsorEditorModal({
           {logoUrl && !photoFailed ? (
             <Image
               source={{ uri: logoUrl }}
-              style={[styles.logoPreview, logoBackground === "dark" ? styles.logoPreviewDark : null]}
+              style={styles.logoPreview}
               resizeMode="contain"
               onError={() => setPhotoFailed(true)}
             />
@@ -83,7 +81,6 @@ export function SponsorEditorModal({
           <TouchableOpacity style={styles.pickButton} onPress={handlePickLogo} disabled={uploading}>
             <Text style={styles.pickButtonText}>{uploading ? "Otpremanje..." : logoUrl ? "Promeni logo" : "Dodaj logo"}</Text>
           </TouchableOpacity>
-          {logoUrl ? <LogoBackgroundToggle value={logoBackground} onChange={setLogoBackground} /> : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -110,8 +107,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line
   },
-  logoPreview: { width: 96, height: 96, borderRadius: 16, alignSelf: "center", backgroundColor: "#fff" },
-  logoPreviewDark: { backgroundColor: colors.ink },
+  logoPreview: { width: 96, height: 96, borderRadius: 16, alignSelf: "center", backgroundColor: colors.surfaceMuted },
   pickButton: { backgroundColor: colors.surfaceMuted, borderRadius: 14, paddingVertical: 12, alignItems: "center", borderWidth: 1, borderColor: colors.line },
   pickButtonText: { color: colors.purple, fontWeight: "700" },
   error: { color: colors.danger, fontWeight: "700", textAlign: "center" },

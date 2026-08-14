@@ -61,20 +61,17 @@ export function SponsorMarquee() {
 function SponsorLogo({ sponsor }: { sponsor: Sponsor }) {
   const [failed, setFailed] = useState(false);
   if (!sponsor.logoUrl || failed) return null;
-  // Each logo gets its own card instead of one shared bar behind all of them - the
-  // strip can be scrolling several sponsors at once, and a single shared background
-  // can't be right for both a white-background logo and a black-background one at
-  // the same time.
-  const dark = sponsor.logoBackground === "dark";
+  // The logo fills its own card edge to edge - no separate background layer behind
+  // it, so each sponsor's own logo background (whatever it is) just is the card.
   return (
     <TouchableOpacity
-      style={[styles.logoWrap, dark ? styles.logoWrapDark : null]}
+      style={styles.logoWrap}
       activeOpacity={sponsor.targetUrl ? 0.7 : 1}
       onPress={() => {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="contain" onError={() => setFailed(true)} />
+      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }
@@ -92,19 +89,15 @@ const styles = StyleSheet.create({
     width: LOGO_WIDTH,
     height: LOGO_HEIGHT,
     marginHorizontal: GAP / 2,
-    alignItems: "center",
-    justifyContent: "center",
     borderRadius: 14,
-    backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    paddingHorizontal: 8,
+    overflow: "hidden",
     shadowColor: "#141414",
     shadowOpacity: 0.1,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 3
   },
-  logoWrapDark: { backgroundColor: colors.ink, borderColor: colors.ink },
   logo: { width: "100%", height: "100%" }
 });

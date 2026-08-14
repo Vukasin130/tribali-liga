@@ -43,12 +43,11 @@ export function SponsorRail({ sponsors, onChanged }: { sponsors: Sponsor[]; onCh
 function SponsorTile({ sponsor, isAdmin, onPress }: { sponsor: Sponsor; isAdmin: boolean; onPress: () => void }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  // Match the tile background to whichever backdrop this logo was designed against,
-  // instead of always forcing white behind logos that already have a dark background.
-  const dark = sponsor.logoBackground === "dark";
+  // The logo fills the tile edge to edge - no separate background layer behind it to
+  // ever mismatch, whatever the logo's own background is.
   return (
     <TouchableOpacity
-      style={[styles.tile, dark ? styles.tileDark : null]}
+      style={styles.tile}
       activeOpacity={0.7}
       onPress={() => {
         if (isAdmin) {
@@ -58,7 +57,7 @@ function SponsorTile({ sponsor, isAdmin, onPress }: { sponsor: Sponsor; isAdmin:
         }
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="contain" onError={() => setFailed(true)} />
+      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }
@@ -71,19 +70,15 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 20,
-    backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 12,
+    overflow: "hidden",
     shadowColor: "#141414",
     shadowOpacity: 0.06,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 1
   },
-  tileDark: { backgroundColor: colors.ink, borderColor: colors.ink },
-  addTile: { backgroundColor: colors.surfaceMuted, borderStyle: "dashed" },
+  addTile: { alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted, borderStyle: "dashed" },
   logo: { width: "100%", height: "100%" }
 });

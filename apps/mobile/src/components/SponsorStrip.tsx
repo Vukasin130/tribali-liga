@@ -56,19 +56,18 @@ export function SponsorStrip() {
 function SponsorTile({ sponsor }: { sponsor: Sponsor }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  // Logos arrive with their own baked-in background - a hardcoded white tile behind a
-  // dark-background logo just draws a mismatched box, so the tile matches whichever
-  // background the admin picked for this logo when they uploaded it.
-  const dark = sponsor.logoBackground === "dark";
+  // The logo image fills the tile edge to edge, cropped to it - there's no separate
+  // background layer behind it, so whatever background the logo itself has (black,
+  // white, transparent, brand color) just is the tile. Nothing to mismatch.
   return (
     <TouchableOpacity
-      style={[styles.tile, dark ? styles.tileDark : null]}
+      style={styles.tile}
       activeOpacity={sponsor.targetUrl ? 0.7 : 1}
       onPress={() => {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="contain" onError={() => setFailed(true)} />
+      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }
@@ -81,14 +80,10 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 8
+    overflow: "hidden"
   },
-  tileDark: { backgroundColor: colors.ink, borderColor: colors.ink },
-  addTile: { backgroundColor: colors.surfaceMuted, borderStyle: "dashed" },
+  addTile: { alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceMuted, borderStyle: "dashed" },
   logo: { width: "100%", height: "100%" }
 });
