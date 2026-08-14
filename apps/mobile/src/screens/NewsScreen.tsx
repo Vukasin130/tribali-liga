@@ -368,7 +368,7 @@ export function NewsScreen() {
                 if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
               }}
             >
-              <SponsorLogo logoUrl={sponsor.logoUrl} isWide={isWide} />
+              <SponsorLogo logoUrl={sponsor.logoUrl} />
             </TouchableOpacity>
           ) : (
             <Text style={styles.pollCopy}>Jos nema podesenog sponzora.</Text>
@@ -567,30 +567,18 @@ function NewsThumb({ mediaUrl, style }: { mediaUrl?: string; style: StyleProp<Im
   return <View style={[style, styles.newsRowThumbPlaceholder]} />;
 }
 
-function SponsorLogo({ logoUrl, isWide }: { logoUrl: string; isWide: boolean }) {
+function SponsorLogo({ logoUrl }: { logoUrl: string }) {
   const [failed, setFailed] = useState(false);
-  // Measuring the real image and sizing the box to its own aspect ratio (instead of a
-  // fixed box with resizeMode="contain", which just letterboxes it) makes the logo fill
-  // its slot naturally. On the wide desktop layout the slot itself is the full card
-  // width - no separate max-width cap there, so the logo actually fills the screen
-  // width instead of just sitting at a modest fixed size.
-  const [ratio, setRatio] = useState(3);
-  useEffect(() => {
-    setFailed(false);
-    Image.getSize(
-      logoUrl,
-      (width, height) => {
-        if (width && height) setRatio(width / height);
-      },
-      () => undefined
-    );
-  }, [logoUrl]);
   if (failed) return null;
-  const idealHeight = 140;
+  // The box is a fixed size regardless of which sponsor/logo is set - the logo
+  // scales to fit inside it (resizeMode="contain", never cropped or distorted)
+  // instead of the box resizing itself to match each logo's own aspect ratio,
+  // which used to make the whole card grow or shrink every time the sponsor logo
+  // changed.
   return (
     <Image
       source={{ uri: logoUrl }}
-      style={[styles.sponsorLogo, { aspectRatio: ratio }, isWide ? null : { maxWidth: idealHeight * ratio }]}
+      style={styles.sponsorLogo}
       resizeMode="contain"
       onError={() => setFailed(true)}
     />
@@ -756,7 +744,7 @@ const styles = StyleSheet.create({
   pollComingSoonCopy: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" },
   sponsorCard: { gap: 10 },
   sponsorEyebrow: { color: colors.textMuted, fontWeight: "700", fontSize: 11, textTransform: "uppercase" },
-  sponsorLogo: { width: "100%", alignSelf: "center" },
+  sponsorLogo: { width: "100%", height: 140, alignSelf: "center" },
   carouselWrap: {
     borderRadius: 26,
     overflow: "hidden",
