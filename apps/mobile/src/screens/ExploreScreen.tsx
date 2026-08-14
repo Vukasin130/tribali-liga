@@ -283,8 +283,11 @@ export function ExploreScreen() {
                 style={[styles.leaderRow, isWide ? styles.searchRowWide : null]}
                 onPress={() => setActivePlayerId(leader.playerId)}
               >
-                <View style={styles.leaderMedal}>
-                  <Text style={styles.leaderMedalText}>{leader.rank}</Text>
+                <View style={styles.leaderAvatarWrap}>
+                  <PlayerAvatar photoUrl={leader.avatarUrl} name={leader.playerName} />
+                  <View style={styles.leaderMedal}>
+                    <Text style={styles.leaderMedalText}>{leader.rank}</Text>
+                  </View>
                 </View>
                 <View style={styles.searchInfo}>
                   <Text style={styles.searchName}>{leader.playerName}</Text>
@@ -312,7 +315,7 @@ export function ExploreScreen() {
   );
 }
 
-function PlayerAvatar({ photoUrl, name, size = 46 }: { photoUrl?: string; name: string; size?: number }) {
+function PlayerAvatar({ photoUrl, name, size = 56 }: { photoUrl?: string; name: string; size?: number }) {
   const [failed, setFailed] = useState(false);
   const shape = { width: size, height: size, borderRadius: size / 2 };
   if (photoUrl && !failed) {
@@ -454,6 +457,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.line
   },
-  leaderMedal: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.yellow, alignItems: "center", justifyContent: "center" },
-  leaderMedalText: { color: colors.ink, fontWeight: "700" }
+  // The rank badge rides on the photo's own corner instead of sitting as a separate
+  // same-size circle next to it - keeps the player's photo the biggest, clearest
+  // thing in the row instead of splitting attention between two equal circles.
+  leaderAvatarWrap: { position: "relative" },
+  leaderMedal: {
+    position: "absolute",
+    bottom: -4,
+    right: -4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.yellow,
+    borderWidth: 2,
+    borderColor: colors.card,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  leaderMedalText: { color: colors.ink, fontWeight: "700", fontSize: 11 }
 });
