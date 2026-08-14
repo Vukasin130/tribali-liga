@@ -465,7 +465,12 @@ function belgradeWeekBounds(instant: Date): { weekStart: Date; weekEnd: Date } {
 // already "locked"/"finished" keeps its recorded dates untouched, and re-running never
 // creates duplicate rows (upserts by week-index name).
 export async function runFantasyGameweekSweep(): Promise<void> {
-  const seasons = await query("select id from public.fantasy_seasons where status != 'finished'");
+  // Only a season an admin has actually activated should accrue rounds - a season
+  // still sitting in "draft" can already have a linked competition with weeks of
+  // scheduled matches, and "!= 'finished'" used to let those get swept into real
+  // Kolo N rounds (opened, and eventually locked/scored) before the season - or its
+  // player pool - was ever actually ready, which is exactly backwards.
+  const seasons = await query("select id from public.fantasy_seasons where status = 'active'");
   for (const seasonRow of seasons.rows) {
     try {
       await sweepFantasySeasonGameweeks(seasonRow.id);
