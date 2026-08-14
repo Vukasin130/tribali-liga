@@ -31,6 +31,7 @@ import {
 import type { GoalPoll, MatchSummary, NewsFeed, NewsItem, Sponsor, StoryFolder } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton, SectionTitle } from "../components/ui";
 import { colors } from "../theme/colors";
+import { wideContentLarge } from "../theme/layout";
 import { InlineVideo } from "../components/InlineVideo";
 import { StoryViewerModal } from "./StoryViewerModal";
 import { NewsDetailModal } from "./NewsDetailModal";
@@ -207,7 +208,7 @@ export function NewsScreen() {
     <>
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, isWide ? styles.contentWide : null]}
+      contentContainerStyle={[styles.content, isWide ? [styles.contentWide, wideContentLarge] : null]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.purple} />}
     >
       <View style={[styles.brandRow, isWide ? styles.brandRowWide : null]}>
