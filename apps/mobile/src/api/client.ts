@@ -1,7 +1,17 @@
 import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || "http://127.0.0.1:8787";
+// Real, shipped-app safety net: EXPO_PUBLIC_API_BASE_URL is meant to always be set (via
+// apps/mobile/.env for local dev, via EAS environment variables for cloud builds - see
+// `eas env:list`), but if it's ever missing for any reason (misconfigured build,
+// forgotten env var on a new EAS project, etc.), falling back to the device's own
+// loopback address is a guaranteed-broken app for every single real install - nothing
+// ever listens on 127.0.0.1 on a phone. Falling back to the real production API instead
+// means a misconfigured build still works, rather than failing "network request failed"
+// for 100% of everyone who installs it. (Local dev always has its own explicit .env
+// override, so this fallback only ever applies when nothing else set it - i.e. exactly
+// the scenario that broke the first internal testing build.)
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || "https://tribali-liga.onrender.com";
 const TOKEN_KEY = "uf_mobile_token";
 
 export class ApiError extends Error {
