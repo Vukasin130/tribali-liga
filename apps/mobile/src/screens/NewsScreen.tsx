@@ -43,6 +43,11 @@ import { LiveMatchesModal } from "./LiveMatchesModal";
 import { useAuth } from "../state/AuthContext";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
 
+// Temporarily off at the user's request (Aug 2026) - the feature and all its code/data
+// stay intact, this is the only switch. Nothing else needs to change to bring it back;
+// flip this back to true when stories development resumes.
+const STORIES_ENABLED = false;
+
 export function NewsScreen() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -90,7 +95,7 @@ export function NewsScreen() {
     try {
       const [newsFeed, storyFolders, currentPoll, sponsorData, live] = await Promise.all([
         fetchNews(),
-        fetchStories().catch(() => []),
+        STORIES_ENABLED ? fetchStories().catch(() => []) : Promise.resolve([]),
         fetchCurrentGoalPoll().catch(() => null),
         fetchSponsor().catch(() => null),
         listLiveMatches().catch(() => [])
@@ -238,7 +243,7 @@ export function NewsScreen() {
 
       {error ? <ErrorState message={error} onRetry={load} /> : null}
 
-      {!isWide && (stories.length > 0 || isAdmin) ? (
+      {STORIES_ENABLED && !isWide && (stories.length > 0 || isAdmin) ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storiesRow}>
           {isAdmin ? (
             <TouchableOpacity style={styles.storyBubble} onPress={() => setShowStoryComposer(true)}>
