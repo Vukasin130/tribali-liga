@@ -5,16 +5,20 @@
   "main": "index.ts",
   "scripts": {
     "web": "expo start --web --port 8082",
-    "build": "expo export --platform web"
+    "build": "expo export --platform web && node scripts/inject-seo.mjs"
   },
   "dependencies": {
-    "@tribali-liga/mobile": "*",
     "@expo/vector-icons": "^15.0.3",
     "@react-navigation/bottom-tabs": "^7.18.11",
     "@react-navigation/native": "^7.3.11",
     "@react-navigation/native-stack": "^7.18.3",
     "@tanstack/react-query": "^5.101.4",
+    "@tribali-liga/mobile": "*",
     "expo": "^54.0.0",
+    "expo-application": "~7.0.8",
+    "expo-device": "~8.0.10",
+    "expo-localization": "~17.0.9",
+    "posthog-react-native": "^4.63.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",

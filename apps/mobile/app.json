@@ -40,7 +40,8 @@
         {
           "photosPermission": "Tribali Liga koristi galeriju da otpremis slike i video zapise (npr. gol nedelje, vesti, profilnu sliku)."
         }
-      ]
+      ],
+      "expo-localization"
     ]
   }
 }

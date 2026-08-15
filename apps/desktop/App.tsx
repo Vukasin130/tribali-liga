@@ -2,7 +2,7 @@ import "react-native-gesture-handler";
 import React from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient, AuthProvider, LayoutModeProvider, RootNavigator } from "@tribali-liga/mobile/shared";
+import { queryClient, AuthProvider, LayoutModeProvider, RootNavigator, AnalyticsProvider } from "@tribali-liga/mobile/shared";
 import { DesktopShell } from "./src/components/DesktopShell";
 
 // This project's only purpose is to run apps/mobile's own screens/navigation
@@ -14,16 +14,18 @@ import { DesktopShell } from "./src/components/DesktopShell";
 // this app's whole purpose is the desktop experience, not a live width measurement.
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <AuthProvider>
-          <LayoutModeProvider isWide>
-            <DesktopShell>
-              <RootNavigator />
-            </DesktopShell>
-          </LayoutModeProvider>
-        </AuthProvider>
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    <AnalyticsProvider>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <AuthProvider>
+            <LayoutModeProvider isWide>
+              <DesktopShell>
+                <RootNavigator />
+              </DesktopShell>
+            </LayoutModeProvider>
+          </AuthProvider>
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </AnalyticsProvider>
   );
 }

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { getAuthToken, loadStoredToken, setAuthToken } from "../api/client";
 import { fetchSession, login as loginRequest, register as registerRequest, registerPushToken } from "../api/endpoints";
 import { registerForPushNotificationsAsync } from "../notifications";
+import { identifyAnalyticsUser, resetAnalyticsUser } from "../analytics";
 import type { AuthUser } from "../api/types";
 
 interface AuthContextValue {
@@ -32,6 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const sessionUser = await fetchSession();
         setUser(sessionUser);
         setStatus("signed-in");
+        identifyAnalyticsUser(sessionUser.id, { email: sessionUser.email, role: sessionUser.role });
       } catch {
         await setAuthToken(null);
         setStatus("signed-out");
@@ -46,6 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await setAuthToken(session.token);
       setUser(session.user);
       setStatus("signed-in");
+      identifyAnalyticsUser(session.user.id, { email: session.user.email, role: session.user.role });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Prijava nije uspela.");
       throw err;
@@ -67,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await setAuthToken(null);
     setUser(null);
     setStatus("signed-out");
+    resetAnalyticsUser();
   }
 
   function refreshUser(nextUser: AuthUser) {

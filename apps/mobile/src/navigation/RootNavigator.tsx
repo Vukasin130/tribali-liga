@@ -1,5 +1,5 @@
-import React from "react";
-import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
+import React, { useRef } from "react";
+import { NavigationContainer, DefaultTheme, type NavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { View } from "react-native";
@@ -18,6 +18,7 @@ import { CompetitionProvider } from "../state/CompetitionContext";
 import { LoadingState } from "../components/ui";
 import { colors } from "../theme/colors";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
+import { trackScreen } from "../analytics";
 import type { AuthStackParamList, MainTabParamList } from "./types";
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -101,9 +102,23 @@ function AuthNavigator() {
 
 export function RootNavigator() {
   const { status } = useAuth();
+  const navigationRef = useRef<NavigationContainerRef<AuthStackParamList & MainTabParamList>>(null);
+  const lastTrackedRoute = useRef<string | null>(null);
+
+  // react-navigation v7 removed PostHog's automatic screen-capture support (that only
+  // ever worked with v6 and below), so this is the manual replacement - covers the 6
+  // main tabs plus the auth screens. Player/team/match profile "screens" are actually
+  // full-screen Modals that never touch this navigation state, so they're a known gap,
+  // not silently missing by accident.
+  function handleStateChange() {
+    const routeName = navigationRef.current?.getCurrentRoute()?.name;
+    if (!routeName || routeName === lastTrackedRoute.current) return;
+    lastTrackedRoute.current = routeName;
+    trackScreen(routeName);
+  }
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={navigationRef} theme={navigationTheme} onStateChange={handleStateChange}>
       {status === "checking" ? (
         <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center" }}>
           <LoadingState label="Proveravam prijavu..." />

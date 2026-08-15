@@ -8,6 +8,7 @@ import { queryClient } from "./src/api/queryClient";
 import { AuthProvider } from "./src/state/AuthContext";
 import { LayoutModeProvider } from "./src/state/LayoutModeContext";
 import { RootNavigator } from "./src/navigation/RootNavigator";
+import { AnalyticsProvider } from "./src/analytics";
 
 // On web, the app is designed phone-only - always render it inside a fixed-width
 // phone-shaped frame instead of stretching across the full browser window, regardless
@@ -26,18 +27,20 @@ function WebShell({ children }: { children: React.ReactNode }) {
 
 function AppContent() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <SafeAreaProvider>
-        <AuthProvider>
-          <LayoutModeProvider isWide={false}>
-            <WebShell>
-              <StatusBar style="light" />
-              <RootNavigator />
-            </WebShell>
-          </LayoutModeProvider>
-        </AuthProvider>
-      </SafeAreaProvider>
-    </QueryClientProvider>
+    <AnalyticsProvider>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <AuthProvider>
+            <LayoutModeProvider isWide={false}>
+              <WebShell>
+                <StatusBar style="light" />
+                <RootNavigator />
+              </WebShell>
+            </LayoutModeProvider>
+          </AuthProvider>
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </AnalyticsProvider>
   );
 }
 

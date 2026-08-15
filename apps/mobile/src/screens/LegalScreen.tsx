@@ -51,6 +51,11 @@ const PRIVACY_SECTIONS = [
       "Podaci se cuvaju kod Supabase (Postgres baza sa autentifikacijom), infrastrukturnog provajdera koji koristimo za backend. Komunikacija izmedju aplikacije i servera ide preko standardnih bezbednih HTTPS konekcija."
   },
   {
+    heading: "Analitika koriscenja",
+    body:
+      "Koristimo PostHog da vidimo koji delovi aplikacije se koriste i da otkrijemo greske - koje ekrane otvaras, na koja dugmad klikces, tip uredjaja i aplikacije. Ovo je odvojeno od tvog fantasy tima i profila i ne prodajemo ga niti delimo sa trecim stranama van PostHog-a kao nase obrade podataka. Ako si prijavljen, ova aktivnost se povezuje sa tvojim nalogom (ne sa imenom ili lozinkom) da bismo razumeli kako se aplikacija stvarno koristi."
+  },
+  {
     heading: "Tvoja prava",
     body:
       "Mozes u svakom trenutku izmeniti ime i profilnu sliku u podesavanjima naloga. Ako zelis da ti nalog i svi podaci budu trajno obrisani, kontaktiraj nas na email naveden u podesavanjima aplikacije - zahtev obradjujemo u razumnom roku."

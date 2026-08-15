@@ -6,6 +6,7 @@ export { queryClient } from "./src/api/queryClient";
 export { AuthProvider, useAuth } from "./src/state/AuthContext";
 export { RootNavigator } from "./src/navigation/RootNavigator";
 export { LayoutModeProvider } from "./src/state/LayoutModeContext";
+export { AnalyticsProvider } from "./src/analytics";
 export { fetchGeneralSponsors, listVerificationRequests, reviewVerificationRequest, searchPlayers } from "./src/api/endpoints";
 export type { Player, Sponsor, VerificationRequest } from "./src/api/types";
 export { colors } from "./src/theme/colors";

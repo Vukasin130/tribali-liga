@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://tribali-liga-1.onrender.com/sitemap.xml
