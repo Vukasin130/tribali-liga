@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import {
   deleteAccount,
-  fetchCompetitionTeams,
+  fetchAllTeams,
   fetchDiscount,
   fetchDiscountForAdmin,
   fetchMyAvailabilityRequests,
@@ -21,7 +21,6 @@ import { Card, ErrorState, LoadingState, Pill, PrimaryButton } from "../componen
 import { colors } from "../theme/colors";
 import { useAuth } from "../state/AuthContext";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
-import { useCompetition } from "../state/CompetitionContext";
 import { DiscountEditorModal } from "./DiscountEditorModal";
 import { LegalScreen } from "./LegalScreen";
 import { NotificationComposerModal } from "./NotificationComposerModal";
@@ -29,7 +28,6 @@ import { SponsorsManagerModal } from "./SponsorsManagerModal";
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
-  const { competitionId } = useCompetition();
   const isWide = useIsWideScreen();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -98,12 +96,17 @@ export function ProfileScreen() {
     }
   }
 
+  // Every team in the DB, not scoped to whichever competition happens to be selected
+  // elsewhere in the app - a team only needs to exist (via Explore > Ekipe), not be
+  // attached to a currently-active league, for someone to claim it here. Matches
+  // RegisterScreen's identical "pick your team" step during sign-up. Only fetched once
+  // the form is actually opened, same reasoning as there.
   useEffect(() => {
-    if (!competitionId) return;
-    fetchCompetitionTeams(competitionId)
+    if (!showVerifyForm || teams.length > 0) return;
+    fetchAllTeams()
       .then(setTeams)
       .catch(() => undefined);
-  }, [competitionId]);
+  }, [showVerifyForm, teams.length]);
 
   useEffect(() => {
     if (!teamId) {
