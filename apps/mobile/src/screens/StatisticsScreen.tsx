@@ -218,9 +218,11 @@ export function StatisticsScreen() {
 
           <Card style={styles.gridCard}>
             <SectionTitle eyebrow="Fantasy" title="Ucesce u fantasy igri" />
+            <Text style={styles.hint}>Samo sezone koje su vec pokrenute - timovi napravljeni dok je sezona jos u pripremi ne racunaju se ovde kao ucesce.</Text>
             <View style={styles.tileRow}>
               <StatTile value={data.fantasy.totalTeams} label="fantasy timova" />
               <StatTile value={data.fantasy.newLast30Days} label="novih timova (30d)" />
+              <StatTile value={data.fantasy.draftTeams} label="pripremljeno pre starta" />
             </View>
           </Card>
 

@@ -93,9 +93,18 @@ export async function getAnalyticsOverview() {
         union all
         select created_at as ts from public.match_predictions
       `),
-      query<{ total: string; new_last_30_days: string }>(
-        `select count(*)::int as total, count(*) filter (where created_at >= now() - interval '30 days')::int as new_last_30_days
-         from public.fantasy_teams`
+      // Split by season status rather than counting every fantasy_teams row: a team
+      // drafted while its season is still 'draft' (not yet launched by the admin) is a
+      // real squad someone built, but it is not "participation in the fantasy game" -
+      // that season hasn't started, nothing has been scored yet. Conflating the two
+      // is exactly the misleading-stat problem this dashboard exists to avoid.
+      query<{ total: string; new_last_30_days: string; draft_total: string }>(
+        `select
+           count(*) filter (where fs.status in ('active', 'finished'))::int as total,
+           count(*) filter (where fs.status in ('active', 'finished') and ft.created_at >= now() - interval '30 days')::int as new_last_30_days,
+           count(*) filter (where fs.status = 'draft')::int as draft_total
+         from public.fantasy_teams ft
+         join public.fantasy_seasons fs on fs.id = ft.fantasy_season_id`
       ),
       totalWithRecent("story_views", "viewed_at"),
       totalWithRecent("story_likes", "created_at"),
@@ -155,7 +164,8 @@ export async function getAnalyticsOverview() {
     activityPerDay,
     fantasy: {
       totalTeams: Number(fantasyRow.total),
-      newLast30Days: Number(fantasyRow.new_last_30_days)
+      newLast30Days: Number(fantasyRow.new_last_30_days),
+      draftTeams: Number(fantasyRow.draft_total)
     },
     engagement: {
       storyViews,

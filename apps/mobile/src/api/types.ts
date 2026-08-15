@@ -689,8 +689,13 @@ export interface AnalyticsOverview {
   registrationsPerDay: AnalyticsDailyCount[];
   activityPerDay: AnalyticsDailyCount[];
   fantasy: {
+    // Teams whose season has actually launched (active or finished) - real
+    // participation. Excludes squads drafted while the season is still in prep.
     totalTeams: number;
     newLast30Days: number;
+    // Squads already built for a season that hasn't launched yet (status "draft") -
+    // real interest, but not participation: nothing has been scored yet.
+    draftTeams: number;
   };
   engagement: {
     storyViews: AnalyticsEngagementMetric;
