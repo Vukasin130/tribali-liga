@@ -22,7 +22,7 @@ const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Od
 type Tab = "profil" | "stats" | "utakmice";
 const TABS: { key: Tab; label: string }[] = [
   { key: "profil", label: "Profil" },
-  { key: "stats", label: "Stats" },
+  { key: "stats", label: "Statistika" },
   { key: "utakmice", label: "Utakmice" }
 ];
 
