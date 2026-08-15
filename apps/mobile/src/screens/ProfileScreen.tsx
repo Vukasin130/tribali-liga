@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -9,6 +9,7 @@ import {
   fetchDiscountForAdmin,
   fetchMyAvailabilityRequests,
   fetchMyVerificationRequests,
+  fetchPlayerProfile,
   fetchProfile,
   fetchTeamPlayers,
   requestVerification,
@@ -16,14 +17,17 @@ import {
   updateProfile
 } from "../api/endpoints";
 import { ApiError } from "../api/client";
-import type { MatchAvailabilityRequest, Player, Profile, Sponsor, Team, VerificationRequest } from "../api/types";
+import type { MatchAvailabilityRequest, Player, PlayerProfile, Profile, Sponsor, Team, VerificationRequest } from "../api/types";
 import { Card, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
-import { colors } from "../theme/colors";
+import { colors, gradients } from "../theme/colors";
 import { useAuth } from "../state/AuthContext";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
+import { kitGradientForTeam } from "../components/PitchPlayerCard";
+import { positionGroupOf } from "../fantasyConstants";
 import { DiscountEditorModal } from "./DiscountEditorModal";
 import { LegalScreen } from "./LegalScreen";
 import { NotificationComposerModal } from "./NotificationComposerModal";
+import { PlayerProfileModal } from "./PlayerProfileModal";
 import { SponsorsManagerModal } from "./SponsorsManagerModal";
 
 export function ProfileScreen() {
@@ -57,6 +61,10 @@ export function ProfileScreen() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
+  const [verifiedPlayer, setVerifiedPlayer] = useState<PlayerProfile | null>(null);
+  const [verifiedPlayerPhotoFailed, setVerifiedPlayerPhotoFailed] = useState(false);
+  const [showFullPlayerProfile, setShowFullPlayerProfile] = useState(false);
+
   useEffect(() => {
     fetchProfile()
       .then((data) => {
@@ -74,6 +82,15 @@ export function ProfileScreen() {
       .then(setAvailabilityRequests)
       .catch(() => undefined);
   }, []);
+
+  // Once approved, this tab's job shifts from "prove it's you" to "show the real thing" -
+  // the same rich profile every other player gets, not a dashes-only teaser.
+  useEffect(() => {
+    if (profile?.verificationStatus !== "approved" || !profile.verifiedPlayerId) return;
+    fetchPlayerProfile(profile.verifiedPlayerId)
+      .then(setVerifiedPlayer)
+      .catch(() => undefined);
+  }, [profile?.verificationStatus, profile?.verifiedPlayerId]);
 
   // Admin sees the record even while it's turned off (so they can re-enable it without
   // retyping everything); everyone else only sees it once it's actually active.
@@ -214,16 +231,18 @@ export function ProfileScreen() {
           />
         </View>
 
-        <View style={styles.badgeRow}>
-          <Pill
-            label={profile?.role === "admin" ? "Administrator" : "Fan"}
-            tone={profile?.role === "admin" ? "success" : "neutral"}
-          />
-          <Pill
-            label={verificationLabel(profile?.verificationStatus, pendingRequest)}
-            tone={isApprovedPlayer ? "success" : pendingRequest || profile?.verificationStatus === "pending" ? "warning" : "neutral"}
-          />
-        </View>
+        {isApprovedPlayer ? null : (
+          <View style={styles.badgeRow}>
+            <Pill
+              label={profile?.role === "admin" ? "Administrator" : "Fan"}
+              tone={profile?.role === "admin" ? "success" : "neutral"}
+            />
+            <Pill
+              label={verificationLabel(profile?.verificationStatus, pendingRequest)}
+              tone={pendingRequest || profile?.verificationStatus === "pending" ? "warning" : "neutral"}
+            />
+          </View>
+        )}
 
         <Text style={styles.label}>Ime i prezime</Text>
         <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholderTextColor={colors.textMuted} />
@@ -251,17 +270,13 @@ export function ProfileScreen() {
           <PrimaryButton label="Posalji notifikaciju" onPress={() => setShowNotificationComposer(true)} />
         </Card>
       ) : isApprovedPlayer ? (
-        <LinearGradient colors={["#141414", "#C9A227", "#8A6D1F"]} style={styles.verifiedCard}>
-          <Pill label="Verified player" tone="success" />
-          <Text style={styles.verifiedName}>{profile?.verifiedPlayerName || name}</Text>
-          <Text style={styles.verifiedTeam}>{profile?.teamName}</Text>
-          <View style={styles.metricsGrid}>
-            <MetricBox label="Golovi" value="-" />
-            <MetricBox label="MVP" value="-" />
-            <MetricBox label="F pts" value="-" />
-            <MetricBox label="Owned" value="-" />
-          </View>
-        </LinearGradient>
+        <VerifiedPlayerCard
+          fallbackName={profile?.verifiedPlayerName || name}
+          player={verifiedPlayer}
+          photoFailed={verifiedPlayerPhotoFailed}
+          onPhotoError={() => setVerifiedPlayerPhotoFailed(true)}
+          onOpenFullProfile={() => setShowFullPlayerProfile(true)}
+        />
       ) : (
         <Card style={styles.card}>
           <Text style={styles.cardTitle}>Verifikacija igraca</Text>
@@ -458,6 +473,10 @@ export function ProfileScreen() {
           }}
         />
       ) : null}
+
+      {showFullPlayerProfile && profile?.verifiedPlayerId ? (
+        <PlayerProfileModal playerId={profile.verifiedPlayerId} onClose={() => setShowFullPlayerProfile(false)} />
+      ) : null}
     </ScrollView>
   );
 }
@@ -468,11 +487,77 @@ function formatMatchDate(value: string): string {
   return date.toLocaleString("sr-RS", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function MetricBox({ label, value }: { label: string; value: string }) {
+const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Odbrana", napad: "Napad" };
+
+// The real thing, not a teaser: same photo/stats a verified player already has on their
+// full public profile (see PlayerProfileModal), shown right here instead of a
+// dashes-only card - tapping through opens that exact full profile for the complete
+// history (tabs, form, matches). `player` is null only for the one frame before the
+// fetch resolves; the name/pill still render immediately from the account record.
+function VerifiedPlayerCard({
+  fallbackName,
+  player,
+  photoFailed,
+  onPhotoError,
+  onOpenFullProfile
+}: {
+  fallbackName: string;
+  player: PlayerProfile | null;
+  photoFailed: boolean;
+  onPhotoError: () => void;
+  onOpenFullProfile: () => void;
+}) {
+  const primaryTeam = player?.teams[0] ?? null;
+  const positionGroup = positionGroupOf(player?.position || "");
+  const isGoalkeeper = positionGroup === "golman";
+  const photoGradient = isGoalkeeper ? (["#4a3a14", "#141414"] as const) : kitGradientForTeam(primaryTeam?.teamId || "");
+  const topSeason = player?.seasonStats[0];
+  const displayName = player?.displayName || fallbackName;
+
   return (
-    <View style={styles.metricBox}>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
+    <TouchableOpacity activeOpacity={0.9} onPress={onOpenFullProfile}>
+      <LinearGradient colors={gradients.hero} style={styles.verifiedCard}>
+        <View style={styles.verifiedTopRow}>
+          <Pill label="Verified player" tone="success" />
+          <View style={styles.verifiedOpenHint}>
+            <Text style={styles.verifiedOpenHintText}>Ceo profil</Text>
+            <Ionicons name="chevron-forward" size={14} color="#fff" />
+          </View>
+        </View>
+
+        {player?.avatarUrl && !photoFailed ? (
+          <Image source={{ uri: player.avatarUrl }} style={styles.verifiedPhoto} resizeMode="cover" onError={onPhotoError} />
+        ) : (
+          <LinearGradient colors={photoGradient} style={styles.verifiedPhotoFallback}>
+            <Text style={styles.verifiedPhotoInitials}>{initials(displayName)}</Text>
+          </LinearGradient>
+        )}
+
+        <Text style={styles.verifiedName}>{displayName}</Text>
+        <Text style={styles.verifiedTeam}>
+          {primaryTeam?.teamName || "Bez ekipe"}
+          {player?.position ? ` - ${POSITION_LABELS[positionGroup] || player.position}` : ""}
+        </Text>
+
+        <View style={styles.verifiedStatsRow}>
+          <VerifiedStat icon="calendar-outline" label="utakmica" value={String(topSeason?.appearances ?? 0)} />
+          <VerifiedStat icon="football" label="golovi" value={String(topSeason?.goals ?? 0)} />
+          <VerifiedStat icon="footsteps-outline" label="asistencije" value={String(topSeason?.assists ?? 0)} />
+          <VerifiedStat icon="star" label="fantasy poena" value={String(topSeason?.fantasyPoints ?? 0)} />
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
+function VerifiedStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.verifiedStatTile}>
+      <Ionicons name={icon} size={16} color={colors.accent} />
+      <Text style={styles.verifiedStatValue} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={styles.verifiedStatLabel}>{label}</Text>
     </View>
   );
 }
@@ -562,13 +647,26 @@ const styles = StyleSheet.create({
   teamChipActive: { backgroundColor: colors.ink, borderColor: colors.ink },
   teamChipText: { color: colors.textPrimary, fontWeight: "600", fontSize: 13 },
   teamChipTextActive: { color: "#fff" },
-  verifiedCard: { borderRadius: 20, padding: 18, gap: 8 },
-  verifiedName: { color: "#fff", fontSize: 22, fontWeight: "700", marginTop: 4 },
-  verifiedTeam: { color: "rgba(255,255,255,0.82)", fontWeight: "600" },
-  metricsGrid: { flexDirection: "row", justifyContent: "space-between", marginTop: 10 },
-  metricBox: { alignItems: "center" },
-  metricValue: { color: "#fff", fontWeight: "700", fontSize: 18 },
-  metricLabel: { color: "rgba(255,255,255,0.72)", fontSize: 11, marginTop: 2 },
+  verifiedCard: { borderRadius: 24, padding: 22, gap: 10, alignItems: "center" },
+  verifiedTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", alignSelf: "stretch" },
+  verifiedOpenHint: { flexDirection: "row", alignItems: "center", gap: 2 },
+  verifiedOpenHintText: { color: "rgba(255,255,255,0.78)", fontSize: 12, fontWeight: "700" },
+  verifiedPhoto: { width: 128, height: 128, borderRadius: 24, marginTop: 6 },
+  verifiedPhotoFallback: { width: 128, height: 128, borderRadius: 24, marginTop: 6, alignItems: "center", justifyContent: "center" },
+  verifiedPhotoInitials: { color: "#fff", fontWeight: "800", fontSize: 34 },
+  verifiedName: { color: "#fff", fontSize: 24, fontWeight: "800", marginTop: 6, textAlign: "center" },
+  verifiedTeam: { color: "rgba(255,255,255,0.82)", fontWeight: "600", textAlign: "center" },
+  verifiedStatsRow: { flexDirection: "row", alignSelf: "stretch", justifyContent: "space-between", marginTop: 12, gap: 8 },
+  verifiedStatTile: {
+    flex: 1,
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 14,
+    paddingVertical: 10
+  },
+  verifiedStatValue: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  verifiedStatLabel: { color: "rgba(255,255,255,0.72)", fontSize: 10, fontWeight: "600", textAlign: "center" },
   claimTracker: { flexDirection: "row", alignItems: "center", marginVertical: 6 },
   claimStep: { alignItems: "center", gap: 4, width: 74 },
   claimStepDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.line },
