@@ -38,10 +38,18 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Tribali Liga koristi galeriju da otpremis slike i video zapise (npr. gol nedelje, vesti, profilnu sliku)."
+          "photosPermission": "Tribali Liga koristi galeriju da otpremis slike i video zapise (npr. gol nedelje, vesti, profilnu sliku).",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       "expo-localization"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "965fb240-c1b0-4961-91a4-b92b2960e1c0"
+      }
+    },
+    "owner": "tribalis-team"
   }
 }
