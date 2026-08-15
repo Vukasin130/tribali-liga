@@ -204,6 +204,11 @@ export function ProfileScreen() {
   const pendingRequest = requests.find((request) => request.status === "pending");
   const canRequestVerification = profile?.verificationStatus === "none" && !pendingRequest;
   const isApprovedPlayer = profile?.verificationStatus === "approved";
+  // Admin accounts can independently carry an "approved" verification status without
+  // ever seeing the player-profile card below (that branch is admin-only Sponzori/
+  // Notifikacije instead) - the account card must only disappear when the rich card is
+  // actually the thing replacing it.
+  const showsVerifiedPlayerCard = isApprovedPlayer && !isAdmin;
   const name = profile?.displayName ?? user?.displayName ?? "";
 
   return (
@@ -215,23 +220,19 @@ export function ProfileScreen() {
 
       {error ? <ErrorState message={error} /> : null}
 
-      <Card style={styles.accountCard}>
-        <View style={styles.accountTopRow}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{initials(name)}</Text>
+      {showsVerifiedPlayerCard ? null : (
+        <Card style={styles.accountCard}>
+          <View style={styles.accountTopRow}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{initials(name)}</Text>
+            </View>
+            <View style={styles.accountInfo}>
+              <Text style={styles.accountName}>{name}</Text>
+              <Text style={styles.accountEmail}>{profile?.email ?? user?.email}</Text>
+            </View>
+            <Ionicons name={isAdmin ? "shield-checkmark" : "person-circle-outline"} size={26} color={colors.purple} />
           </View>
-          <View style={styles.accountInfo}>
-            <Text style={styles.accountName}>{name}</Text>
-            <Text style={styles.accountEmail}>{profile?.email ?? user?.email}</Text>
-          </View>
-          <Ionicons
-            name={profile?.role === "admin" ? "shield-checkmark" : isApprovedPlayer ? "checkmark-circle" : "person-circle-outline"}
-            size={26}
-            color={colors.purple}
-          />
-        </View>
 
-        {isApprovedPlayer ? null : (
           <View style={styles.badgeRow}>
             <Pill
               label={profile?.role === "admin" ? "Administrator" : "Fan"}
@@ -242,14 +243,14 @@ export function ProfileScreen() {
               tone={pendingRequest || profile?.verificationStatus === "pending" ? "warning" : "neutral"}
             />
           </View>
-        )}
 
-        <Text style={styles.label}>Ime i prezime</Text>
-        <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholderTextColor={colors.textMuted} />
+          <Text style={styles.label}>Ime i prezime</Text>
+          <TextInput style={styles.input} value={displayName} onChangeText={setDisplayName} placeholderTextColor={colors.textMuted} />
 
-        {saved ? <Text style={styles.savedText}>Sacuvano.</Text> : null}
-        <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj izmene"} onPress={handleSave} loading={saving} />
-      </Card>
+          {saved ? <Text style={styles.savedText}>Sacuvano.</Text> : null}
+          <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj izmene"} onPress={handleSave} loading={saving} />
+        </Card>
+      )}
 
       {isAdmin ? (
         <Card style={styles.card}>
@@ -272,10 +273,16 @@ export function ProfileScreen() {
       ) : isApprovedPlayer ? (
         <VerifiedPlayerCard
           fallbackName={profile?.verifiedPlayerName || name}
+          email={profile?.email ?? user?.email ?? ""}
           player={verifiedPlayer}
           photoFailed={verifiedPlayerPhotoFailed}
           onPhotoError={() => setVerifiedPlayerPhotoFailed(true)}
           onOpenFullProfile={() => setShowFullPlayerProfile(true)}
+          displayName={displayName}
+          onChangeDisplayName={setDisplayName}
+          onSave={handleSave}
+          saving={saving}
+          saved={saved}
         />
       ) : (
         <Card style={styles.card}>
@@ -491,62 +498,95 @@ const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Od
 
 // The real thing, not a teaser: same photo/stats a verified player already has on their
 // full public profile (see PlayerProfileModal), shown right here instead of a
-// dashes-only card - tapping through opens that exact full profile for the complete
+// dashes-only card - tapping "Ceo profil" opens that exact full profile for the complete
 // history (tabs, form, matches). `player` is null only for the one frame before the
-// fetch resolves; the name/pill still render immediately from the account record.
+// fetch resolves; the name/pill still render immediately from the account record. This
+// is also the only account card a verified player sees, so account-name editing lives
+// here too (collapsed behind the pencil icon) instead of a separate top card.
 function VerifiedPlayerCard({
   fallbackName,
+  email,
   player,
   photoFailed,
   onPhotoError,
-  onOpenFullProfile
+  onOpenFullProfile,
+  displayName,
+  onChangeDisplayName,
+  onSave,
+  saving,
+  saved
 }: {
   fallbackName: string;
+  email: string;
   player: PlayerProfile | null;
   photoFailed: boolean;
   onPhotoError: () => void;
   onOpenFullProfile: () => void;
+  displayName: string;
+  onChangeDisplayName: (value: string) => void;
+  onSave: () => void;
+  saving: boolean;
+  saved: boolean;
 }) {
+  const [editingName, setEditingName] = useState(false);
   const primaryTeam = player?.teams[0] ?? null;
   const positionGroup = positionGroupOf(player?.position || "");
   const isGoalkeeper = positionGroup === "golman";
   const photoGradient = isGoalkeeper ? (["#4a3a14", "#141414"] as const) : kitGradientForTeam(primaryTeam?.teamId || "");
   const topSeason = player?.seasonStats[0];
-  const displayName = player?.displayName || fallbackName;
+  const shownName = player?.displayName || fallbackName;
 
   return (
-    <TouchableOpacity activeOpacity={0.9} onPress={onOpenFullProfile}>
-      <LinearGradient colors={gradients.hero} style={styles.verifiedCard}>
-        <View style={styles.verifiedTopRow}>
-          <Pill label="Verified player" tone="success" />
-          <View style={styles.verifiedOpenHint}>
+    <LinearGradient colors={gradients.hero} style={styles.verifiedCard}>
+      <View style={styles.verifiedTopRow}>
+        <Pill label="Verified player" tone="success" />
+        <View style={styles.verifiedTopRowActions}>
+          <TouchableOpacity style={styles.verifiedIconButton} onPress={() => setEditingName((v) => !v)}>
+            <Ionicons name="pencil" size={14} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.verifiedOpenHint} onPress={onOpenFullProfile}>
             <Text style={styles.verifiedOpenHintText}>Ceo profil</Text>
             <Ionicons name="chevron-forward" size={14} color="#fff" />
-          </View>
+          </TouchableOpacity>
         </View>
+      </View>
 
-        {player?.avatarUrl && !photoFailed ? (
-          <Image source={{ uri: player.avatarUrl }} style={styles.verifiedPhoto} resizeMode="cover" onError={onPhotoError} />
-        ) : (
-          <LinearGradient colors={photoGradient} style={styles.verifiedPhotoFallback}>
-            <Text style={styles.verifiedPhotoInitials}>{initials(displayName)}</Text>
-          </LinearGradient>
-        )}
+      {player?.avatarUrl && !photoFailed ? (
+        <Image source={{ uri: player.avatarUrl }} style={styles.verifiedPhoto} resizeMode="cover" onError={onPhotoError} />
+      ) : (
+        <LinearGradient colors={photoGradient} style={styles.verifiedPhotoFallback}>
+          <Text style={styles.verifiedPhotoInitials}>{initials(shownName)}</Text>
+        </LinearGradient>
+      )}
 
-        <Text style={styles.verifiedName}>{displayName}</Text>
-        <Text style={styles.verifiedTeam}>
-          {primaryTeam?.teamName || "Bez ekipe"}
-          {player?.position ? ` - ${POSITION_LABELS[positionGroup] || player.position}` : ""}
-        </Text>
+      <Text style={styles.verifiedName}>{shownName}</Text>
+      <Text style={styles.verifiedTeam}>
+        {primaryTeam?.teamName || "Bez ekipe"}
+        {player?.position ? ` - ${POSITION_LABELS[positionGroup] || player.position}` : ""}
+      </Text>
 
-        <View style={styles.verifiedStatsRow}>
-          <VerifiedStat icon="calendar-outline" label="utakmica" value={String(topSeason?.appearances ?? 0)} />
-          <VerifiedStat icon="football" label="golovi" value={String(topSeason?.goals ?? 0)} />
-          <VerifiedStat icon="footsteps-outline" label="asistencije" value={String(topSeason?.assists ?? 0)} />
-          <VerifiedStat icon="star" label="fantasy poena" value={String(topSeason?.fantasyPoints ?? 0)} />
+      <View style={styles.verifiedStatsRow}>
+        <VerifiedStat icon="calendar-outline" label="utakmica" value={String(topSeason?.appearances ?? 0)} />
+        <VerifiedStat icon="football" label="golovi" value={String(topSeason?.goals ?? 0)} />
+        <VerifiedStat icon="footsteps-outline" label="asistencije" value={String(topSeason?.assists ?? 0)} />
+        <VerifiedStat icon="star" label="fantasy poena" value={String(topSeason?.fantasyPoints ?? 0)} />
+      </View>
+
+      {editingName ? (
+        <View style={styles.verifiedEditBox}>
+          <Text style={styles.verifiedEditLabel}>Ime naloga (za prijavu, ne mora biti isto kao ime igraca)</Text>
+          <TextInput
+            style={styles.verifiedEditInput}
+            value={displayName}
+            onChangeText={onChangeDisplayName}
+            placeholderTextColor="rgba(255,255,255,0.5)"
+          />
+          <Text style={styles.verifiedEditEmail}>{email}</Text>
+          {saved ? <Text style={styles.verifiedEditSaved}>Sacuvano.</Text> : null}
+          <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj izmene"} onPress={onSave} loading={saving} />
         </View>
-      </LinearGradient>
-    </TouchableOpacity>
+      ) : null}
+    </LinearGradient>
   );
 }
 
@@ -649,8 +689,23 @@ const styles = StyleSheet.create({
   teamChipTextActive: { color: "#fff" },
   verifiedCard: { borderRadius: 24, padding: 22, gap: 10, alignItems: "center" },
   verifiedTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", alignSelf: "stretch" },
+  verifiedTopRowActions: { flexDirection: "row", alignItems: "center", gap: 12 },
+  verifiedIconButton: { width: 26, height: 26, borderRadius: 13, backgroundColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" },
   verifiedOpenHint: { flexDirection: "row", alignItems: "center", gap: 2 },
   verifiedOpenHintText: { color: "rgba(255,255,255,0.78)", fontSize: 12, fontWeight: "700" },
+  verifiedEditBox: { alignSelf: "stretch", marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.16)", gap: 8 },
+  verifiedEditLabel: { color: "rgba(255,255,255,0.72)", fontSize: 11, fontWeight: "600" },
+  verifiedEditInput: {
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600"
+  },
+  verifiedEditEmail: { color: "rgba(255,255,255,0.6)", fontSize: 12 },
+  verifiedEditSaved: { color: "#fff", fontWeight: "700", textAlign: "center" },
   verifiedPhoto: { width: 128, height: 128, borderRadius: 24, marginTop: 6 },
   verifiedPhotoFallback: { width: 128, height: 128, borderRadius: 24, marginTop: 6, alignItems: "center", justifyContent: "center" },
   verifiedPhotoInitials: { color: "#fff", fontWeight: "800", fontSize: 34 },
