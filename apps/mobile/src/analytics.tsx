@@ -1,4 +1,5 @@
 import React from "react";
+import { Platform } from "react-native";
 import PostHog, { PostHogProvider } from "posthog-react-native";
 
 // Real product analytics (screen views, retention, funnels) for both this app and
@@ -12,9 +13,22 @@ const HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com";
 
 export const analyticsEnabled = Boolean(API_KEY);
 
+// On native, PostHog persists identity/session to disk via expo-file-system with no
+// setup needed. On web (both apps/desktop and apps/mobile run as a website) there's no
+// filesystem and no async-storage installed, so without an explicit storage it throws
+// at construction time - point it at localStorage instead, which is what a plain web
+// PostHog SDK would use anyway.
+const webStorage =
+  Platform.OS === "web" && typeof window !== "undefined" && window.localStorage
+    ? {
+        getItem: (key: string) => window.localStorage.getItem(key),
+        setItem: (key: string, value: string) => window.localStorage.setItem(key, value)
+      }
+    : undefined;
+
 let client: PostHog | null = null;
 if (analyticsEnabled) {
-  client = new PostHog(API_KEY, { host: HOST });
+  client = new PostHog(API_KEY, { host: HOST, customStorage: webStorage });
 }
 
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
@@ -24,7 +38,12 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   // RootNavigator and AuthContext - always operate on the exact same client.
   if (!analyticsEnabled || !client) return <>{children}</>;
   return (
-    <PostHogProvider client={client} autocapture>
+    // captureScreens: false because its built-in tracker requires living inside
+    // NavigationContainer with a navigationRef - this provider wraps the whole app,
+    // above NavigationContainer, and screens are already tracked manually via
+    // RootNavigator's onStateChange (see trackScreen below). Leaving it on throws
+    // "Couldn't get the navigation state" on every render.
+    <PostHogProvider client={client} autocapture={{ captureScreens: false }}>
       {children}
     </PostHogProvider>
   );
