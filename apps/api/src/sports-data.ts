@@ -335,7 +335,7 @@ export async function getPlayerProfile(id: string) {
   );
   const activeTeamIds = teamIds.rows.map((row) => row.team_id);
 
-  const [teams, seasonStats, matchStats, nextMatch, fantasyPrice] = await Promise.all([
+  const [teams, seasonStats, matchStats, upcomingMatches, fantasyPrice] = await Promise.all([
     attachTeams([normalizePlayer(base.rows[0])]),
     query(
       `select s.*, c.name as competition_name, c.season_name, t.name as team_name
@@ -367,7 +367,7 @@ export async function getPlayerProfile(id: string) {
            left join public.competitions c on c.id = m.competition_id
            where (m.home_team_id = any($1::uuid[]) or m.away_team_id = any($1::uuid[])) and m.status = 'scheduled'
            order by m.scheduled_at asc
-           limit 1`,
+           limit 3`,
           [activeTeamIds]
         )
       : Promise.resolve({ rows: [] as any[] }),
@@ -387,11 +387,18 @@ export async function getPlayerProfile(id: string) {
     )
   ]);
 
+  const normalizedUpcoming = upcomingMatches.rows.map(normalizeNextMatch);
+
   return {
     ...teams[0],
     seasonStats: seasonStats.rows.map(normalizePlayerSeasonStat),
     matchStats: matchStats.rows.map(normalizePlayerMatchStat),
-    nextMatch: nextMatch.rows[0] ? normalizeNextMatch(nextMatch.rows[0]) : null,
+    // nextMatch is the older singular field (still used by the full profile's "Profil"
+    // tab); upcomingMatches is the same query widened to 3 rows for the compact
+    // verified-player card's "Naredne utakmice" list - kept as two fields instead of
+    // migrating every caller to the array.
+    nextMatch: normalizedUpcoming[0] ?? null,
+    upcomingMatches: normalizedUpcoming,
     fantasyPrice: fantasyPrice.rows[0] ? Number(fantasyPrice.rows[0].current_price) : null
   };
 }

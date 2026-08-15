@@ -650,6 +650,9 @@ export interface PlayerProfile {
   seasonStats: PlayerSeasonStat[];
   matchStats: PlayerMatchStat[];
   nextMatch: PlayerNextMatch | null;
+  // Same data as nextMatch, widened to the next 3 scheduled matches - used by the
+  // compact verified-player card's "Naredne utakmice" list.
+  upcomingMatches: PlayerNextMatch[];
   // Current fantasy price, only when this player is in an actually-active fantasy
   // season's pool - null otherwise (not synced yet, or the season isn't live).
   fantasyPrice: number | null;

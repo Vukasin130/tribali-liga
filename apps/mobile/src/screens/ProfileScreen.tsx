@@ -572,6 +572,34 @@ function VerifiedPlayerCard({
         <VerifiedStat icon="star" label="fantasy poena" value={String(topSeason?.fantasyPoints ?? 0)} />
       </View>
 
+      {player && player.upcomingMatches.length > 0 ? (
+        <View style={styles.verifiedMatchSection}>
+          <Text style={styles.verifiedMatchSectionTitle}>Naredne utakmice</Text>
+          {player.upcomingMatches.map((match) => (
+            <View key={`${match.scheduledAt}-${match.homeTeamName}`} style={styles.verifiedMatchRow}>
+              <Text style={styles.verifiedMatchTeams} numberOfLines={1}>
+                {match.homeTeamName} - {match.awayTeamName}
+              </Text>
+              <Text style={styles.verifiedMatchMeta}>{formatMatchDate(match.scheduledAt)}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {player && player.matchStats.length > 0 ? (
+        <View style={styles.verifiedMatchSection}>
+          <Text style={styles.verifiedMatchSectionTitle}>Poslednje utakmice</Text>
+          {player.matchStats.slice(0, 3).map((match) => (
+            <View key={match.matchId} style={styles.verifiedMatchRow}>
+              <Text style={styles.verifiedMatchTeams} numberOfLines={1}>
+                {match.homeTeamName} {match.score} {match.awayTeamName}
+              </Text>
+              <Text style={styles.verifiedMatchPoints}>{match.fantasyPoints} pts</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {editingName ? (
         <View style={styles.verifiedEditBox}>
           <Text style={styles.verifiedEditLabel}>Ime naloga (za prijavu, ne mora biti isto kao ime igraca)</Text>
@@ -706,6 +734,21 @@ const styles = StyleSheet.create({
   },
   verifiedEditEmail: { color: "rgba(255,255,255,0.6)", fontSize: 12 },
   verifiedEditSaved: { color: "#fff", fontWeight: "700", textAlign: "center" },
+  verifiedMatchSection: { alignSelf: "stretch", marginTop: 14, gap: 6 },
+  verifiedMatchSectionTitle: { color: "rgba(255,255,255,0.72)", fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
+  verifiedMatchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 12
+  },
+  verifiedMatchTeams: { flex: 1, color: "#fff", fontSize: 13, fontWeight: "600" },
+  verifiedMatchMeta: { color: "rgba(255,255,255,0.68)", fontSize: 12, fontWeight: "600" },
+  verifiedMatchPoints: { color: colors.accent, fontSize: 13, fontWeight: "800" },
   verifiedPhoto: { width: 128, height: 128, borderRadius: 24, marginTop: 6 },
   verifiedPhotoFallback: { width: 128, height: 128, borderRadius: 24, marginTop: 6, alignItems: "center", justifyContent: "center" },
   verifiedPhotoInitials: { color: "#fff", fontWeight: "800", fontSize: 34 },
