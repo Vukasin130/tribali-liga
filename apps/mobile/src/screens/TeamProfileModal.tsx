@@ -267,10 +267,6 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                             <RosterAvatar avatarUrl={player.avatarUrl} displayName={player.displayName} />
                             <View style={{ flex: 1 }}>
                               <Text style={styles.playerName}>{player.displayName}</Text>
-                              <Text style={styles.playerMeta}>
-                                {player.shirtNumber ? `#${player.shirtNumber} - ` : ""}
-                                {player.appearances} mec.  {player.goals} gol.  {player.assists} as.
-                              </Text>
                             </View>
                             {player.position ? (
                               <View style={styles.positionPill}>
@@ -604,7 +600,6 @@ const styles = StyleSheet.create({
   },
   playerAvatarFallbackText: { color: colors.purple, fontWeight: "800", fontSize: 13 },
   playerName: { color: colors.textPrimary, fontWeight: "700" },
-  playerMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   positionPill: { backgroundColor: colors.surfaceMuted, borderRadius: 8, paddingVertical: 3, paddingHorizontal: 6 },
   positionPillText: { color: colors.textMuted, fontWeight: "800", fontSize: 10 },
   playerPoints: { color: colors.purple, fontWeight: "900", fontSize: 16, minWidth: 26, textAlign: "right" },
