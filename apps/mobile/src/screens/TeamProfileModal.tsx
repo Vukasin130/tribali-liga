@@ -585,24 +585,24 @@ const styles = StyleSheet.create({
   playerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingVertical: 10
+    gap: 14,
+    paddingVertical: 14
   },
   playerRowDivider: { borderTopWidth: 1, borderTopColor: colors.line },
-  playerAvatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.surfaceMuted },
+  playerAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: colors.surfaceMuted },
   playerAvatarFallback: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: colors.surfaceMuted,
     alignItems: "center",
     justifyContent: "center"
   },
-  playerAvatarFallbackText: { color: colors.purple, fontWeight: "800", fontSize: 13 },
-  playerName: { color: colors.textPrimary, fontWeight: "700" },
-  positionPill: { backgroundColor: colors.surfaceMuted, borderRadius: 8, paddingVertical: 3, paddingHorizontal: 6 },
-  positionPillText: { color: colors.textMuted, fontWeight: "800", fontSize: 10 },
-  playerPoints: { color: colors.purple, fontWeight: "900", fontSize: 16, minWidth: 26, textAlign: "right" },
+  playerAvatarFallbackText: { color: colors.purple, fontWeight: "800", fontSize: 18 },
+  playerName: { color: colors.textPrimary, fontWeight: "700", fontSize: 17 },
+  positionPill: { backgroundColor: colors.surfaceMuted, borderRadius: 10, paddingVertical: 5, paddingHorizontal: 9 },
+  positionPillText: { color: colors.textMuted, fontWeight: "800", fontSize: 11 },
+  playerPoints: { color: colors.purple, fontWeight: "900", fontSize: 20, minWidth: 32, textAlign: "right" },
   removePlayerButton: { padding: 6, marginLeft: 2 },
   matchesCard: { gap: 0 },
   matchRow: {
