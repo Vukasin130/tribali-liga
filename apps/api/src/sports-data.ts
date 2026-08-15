@@ -191,16 +191,17 @@ export async function getTeamProfile(id: string) {
        limit 1`,
       [id]
     ),
-    // Same real club's OTHER competition instances (see clubs/team_rosters) -
-    // the global "Ekipe" list shows one row per club, so its profile needs to
-    // surface every team-instance that club participates in, not just this one.
+    // Same real club's OTHER competition instances, past and present (see
+    // clubs/team_rosters) - the global "Ekipe" list shows one row per club, so its
+    // profile needs to surface every season that club ever played, not just
+    // whichever ones happen to still be flagged active.
     clubId
       ? query(
           `select t.id as team_id, t.name as team_name, t.short_name as team_short_name,
-                  t.competition_id, c.name as competition_name, c.season_name
+                  t.competition_id, c.name as competition_name, c.season_name, t.is_active as team_active
            from public.teams t
            left join public.competitions c on c.id = t.competition_id
-           where t.club_id = $1 and t.is_active = true
+           where t.club_id = $1
            order by coalesce(c.starts_at, c.created_at) desc`,
           [clubId]
         )
@@ -245,7 +246,8 @@ export async function getTeamProfile(id: string) {
       teamShortName: row.team_short_name || "",
       competitionId: row.competition_id || "",
       competitionName: row.competition_name || "",
-      seasonName: row.season_name || ""
+      seasonName: row.season_name || "",
+      isActive: Boolean(row.team_active)
     }))
   };
 }
@@ -293,13 +295,17 @@ export async function searchPlayers(searchQuery: string) {
 async function attachTeams<T extends { id: string }>(players: T[]) {
   if (players.length === 0) return players as (T & { teams: any[] })[];
   const ids = players.map((p) => p.id);
+  // Every season this player was ever rostered on, not just the currently-active
+  // one(s) - dropping a player from an old team (tr.is_active = false, see
+  // removePlayerFromTeam) must never make that season's history unreachable from
+  // their own profile. isActive is still exposed so the UI can tell current from past.
   const result = await query(
-    `select tr.player_id, t.id as team_id, t.name as team_name, t.short_name as team_short_name,
+    `select tr.player_id, tr.is_active as roster_active, t.id as team_id, t.name as team_name, t.short_name as team_short_name,
             c.id as competition_id, c.name as competition_name, c.season_name
      from public.team_rosters tr
      join public.teams t on t.id = tr.team_id
      left join public.competitions c on c.id = t.competition_id
-     where tr.player_id = any($1::uuid[]) and tr.is_active = true
+     where tr.player_id = any($1::uuid[])
      order by coalesce(c.starts_at, c.created_at) desc`,
     [ids]
   );
@@ -312,7 +318,8 @@ async function attachTeams<T extends { id: string }>(players: T[]) {
       teamShortName: row.team_short_name || "",
       competitionId: row.competition_id || "",
       competitionName: row.competition_name || "",
-      seasonName: row.season_name || ""
+      seasonName: row.season_name || "",
+      isActive: Boolean(row.roster_active)
     });
   }
   return players.map((player) => ({ ...player, teams: teamsByPlayer.get(player.id) || [] }));

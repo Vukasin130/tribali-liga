@@ -204,7 +204,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                   <View style={styles.section}>
                     {profile.teams.length > 1 ? (
                       <View>
-                        <SectionHeader icon="layers-outline" label="Isti klub igra i u" />
+                        <SectionHeader icon="layers-outline" label="Istorija kluba kroz sezone" />
                         <Card style={styles.teamsCard}>
                           {profile.teams
                             .filter((t) => t.teamId !== teamId)
@@ -219,6 +219,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                                   <Text style={styles.teamRowName}>{t.teamName}</Text>
                                   <Text style={styles.teamRowMeta}>{t.competitionName}{t.seasonName ? ` - ${t.seasonName}` : ""}</Text>
                                 </View>
+                                {t.isActive ? <Pill label="Aktivan" tone="success" /> : null}
                                 <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
                               </TouchableOpacity>
                             ))}
@@ -327,7 +328,10 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                           {profile.standings.map((standing, index) => (
                             <View key={standing.id} style={[styles.standingRow, index > 0 ? styles.standingRowDivider : null]}>
                               <View style={{ flex: 1 }}>
-                                <Text style={styles.standingRowName}>{standing.competitionName || standing.groupName || "Takmicenje"}</Text>
+                                <Text style={styles.standingRowName}>
+                                  {standing.competitionName || standing.groupName || "Takmicenje"}
+                                  {standing.seasonName ? ` - ${standing.seasonName}` : ""}
+                                </Text>
                                 <Text style={styles.standingRowMeta}>
                                   {standing.played} mec.  {standing.wins}-{standing.draws}-{standing.losses}  {standing.goalsFor}:{standing.goalsAgainst}
                                 </Text>

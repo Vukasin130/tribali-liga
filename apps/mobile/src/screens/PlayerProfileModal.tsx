@@ -74,7 +74,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
   }, [profile]);
 
   const activeCompetitionIds = useMemo(
-    () => new Set((profile?.teams ?? []).map((t) => t.competitionId)),
+    () => new Set((profile?.teams ?? []).filter((t) => t.isActive).map((t) => t.competitionId)),
     [profile]
   );
 
@@ -181,7 +181,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
 
                     {profile.teams.length > 0 ? (
                       <View>
-                        <Text style={styles.sectionLabel}>{profile.teams.length > 1 ? "Timovi" : "Tim"}</Text>
+                        <Text style={styles.sectionLabel}>{profile.teams.length > 1 ? "Timovi kroz sezone" : "Tim"}</Text>
                         <Card style={styles.teamsCard}>
                           {profile.teams.map((team, index) => (
                             <TouchableOpacity
@@ -194,6 +194,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                                 <Text style={styles.teamRowName}>{team.teamName}</Text>
                                 <Text style={styles.teamRowMeta}>{team.competitionName}{team.seasonName ? ` - ${team.seasonName}` : ""}</Text>
                               </View>
+                              {team.isActive ? <Pill label="Aktivan" tone="success" /> : null}
                               <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
                             </TouchableOpacity>
                           ))}
@@ -226,7 +227,9 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
                         <Card key={`${stat.competitionId}-${stat.teamId}`} style={styles.seasonRow}>
                           <View style={{ flex: 1 }}>
                             <View style={styles.seasonRowTitle}>
-                              <Text style={styles.seasonRowName}>{stat.competitionName}</Text>
+                              <Text style={styles.seasonRowName}>
+                                {stat.competitionName}{stat.seasonName ? ` - ${stat.seasonName}` : ""}
+                              </Text>
                               {activeCompetitionIds.has(stat.competitionId) ? <Pill label="Aktivna" tone="success" /> : null}
                             </View>
                             <Text style={styles.seasonRowMeta}>

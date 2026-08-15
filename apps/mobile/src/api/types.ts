@@ -520,6 +520,10 @@ export interface PlayerTeamRef {
   competitionId: string;
   competitionName: string;
   seasonName: string;
+  // False for a past season the player is no longer actively rostered on - still
+  // shown (this is full history, not just "currently playing in"), just visually
+  // distinguished from their current team(s).
+  isActive: boolean;
 }
 
 export interface Player {
