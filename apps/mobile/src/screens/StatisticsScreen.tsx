@@ -1,14 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { fetchAnalyticsOverview } from "../api/endpoints";
-import type { AnalyticsDailyCount, AnalyticsOverview } from "../api/types";
+import { fetchAnalyticsOverview, fetchProductAnalytics } from "../api/endpoints";
+import type { AnalyticsDailyCount, AnalyticsOverview, ProductAnalyticsOverview } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, SectionTitle } from "../components/ui";
 import { colors } from "../theme/colors";
 
-// Every number on this screen comes straight from data the app already stores
-// (accounts, votes, views, likes, predictions, fantasy teams) - there's no separate
-// click/screen-view/session tracking system yet, so "time on app" and raw click counts
-// aren't here. This is the fast first pass; true event tracking is a later phase.
+// The cards below (Nalozi, Fantasy, Sadrzaj, Angazovanje) come straight from data the
+// app already stores in its own DB - real, but not real usage tracking. "Ponasanje
+// korisnika" further down is the real thing: actual screen views and active users
+// captured client-side via PostHog (see apps/mobile/src/analytics.tsx) and read back
+// here through apps/api/src/posthog-analytics.ts.
 
 function formatShortDay(value: string): string {
   const date = new Date(value);
@@ -50,8 +51,98 @@ function StatTile({ value, label }: { value: number | string; label: string }) {
   );
 }
 
+// Magnitude bars for a ranked list (top screens, device mix) - one hue, width
+// proportional to the largest value in the list, matching the trend bars above rather
+// than introducing a new color per row (this isn't a category comparison, it's a
+// ranking).
+function ProportionalBars({ rows }: { rows: Array<{ label: string; value: number }> }) {
+  const max = Math.max(1, ...rows.map((r) => r.value));
+  return (
+    <View style={styles.barsList}>
+      {rows.map((row) => (
+        <View key={row.label} style={styles.barsRow}>
+          <Text style={styles.barsLabel} numberOfLines={1}>
+            {row.label}
+          </Text>
+          <View style={styles.barsTrack}>
+            <View style={[styles.barsFill, { width: `${Math.max(4, (row.value / max) * 100)}%` }]} />
+          </View>
+          <Text style={styles.barsValue}>{row.value}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ProductAnalyticsCard({ product, productError }: { product: ProductAnalyticsOverview | null; productError: string }) {
+  if (!product || !product.configured) {
+    return (
+      <Card style={styles.wideCard}>
+        <SectionTitle eyebrow="Ponasanje korisnika" title="Prava analitika (PostHog)" />
+        <EmptyState
+          message={
+            productError ||
+            "Jos nije povezano - potrebno je uneti POSTHOG_PERSONAL_API_KEY i POSTHOG_PROJECT_ID na serveru da bi se ovde prikazali pravi podaci o koriscenju."
+          }
+        />
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card style={styles.wideCard}>
+        <SectionTitle eyebrow="Ponasanje korisnika" title="Aktivnost u aplikaciji" />
+        <View style={styles.tileRow}>
+          <StatTile value={product.activeUsers7d} label="aktivnih (7 dana)" />
+          <StatTile value={product.activeUsers30d} label="aktivnih (30 dana)" />
+          <StatTile value={product.totalEvents30d} label="dogadjaja (30 dana)" />
+        </View>
+      </Card>
+
+      <Card style={styles.wideCard}>
+        <SectionTitle eyebrow="Trend" title="Aktivni korisnici po danu (30 dana)" />
+        {product.dauPerDay.some((d) => d.count > 0) ? (
+          <TrendBars data={product.dauPerDay} color={colors.pink} />
+        ) : (
+          <EmptyState message="Jos nema zabelezenih poseta." />
+        )}
+      </Card>
+
+      <Card style={styles.wideCard}>
+        <SectionTitle eyebrow="Trend" title="Pregledi ekrana po danu (30 dana)" />
+        {product.screenViewsPerDay.some((d) => d.count > 0) ? (
+          <TrendBars data={product.screenViewsPerDay} color={colors.yellow} />
+        ) : (
+          <EmptyState message="Jos nema zabelezenih pregleda ekrana." />
+        )}
+      </Card>
+
+      <Card style={styles.wideCard}>
+        <SectionTitle eyebrow="Ponasanje korisnika" title="Najgledaniji ekrani (30 dana)" />
+        {product.topScreens.length === 0 ? (
+          <EmptyState message="Jos nema zabelezenih pregleda ekrana." />
+        ) : (
+          <ProportionalBars rows={product.topScreens.map((s) => ({ label: s.screen, value: s.views }))} />
+        )}
+      </Card>
+
+      <Card style={styles.wideCard}>
+        <SectionTitle eyebrow="Ponasanje korisnika" title="Uredjaji (30 dana)" />
+        {product.deviceBreakdown.length === 0 ? (
+          <EmptyState message="Jos nema zabelezenih poseta." />
+        ) : (
+          <ProportionalBars rows={product.deviceBreakdown.map((d) => ({ label: d.device, value: d.users }))} />
+        )}
+      </Card>
+    </>
+  );
+}
+
 export function StatisticsScreen() {
   const [data, setData] = useState<AnalyticsOverview | null>(null);
+  const [product, setProduct] = useState<ProductAnalyticsOverview | null>(null);
+  const [productError, setProductError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -63,6 +154,15 @@ export function StatisticsScreen() {
       setError(err instanceof Error ? err.message : "Ne mogu da ucitam statistiku.");
     } finally {
       setLoading(false);
+    }
+    // Kept separate from the block above on purpose: a PostHog outage or a bad key
+    // shouldn't take down the DB-backed stats that already work today.
+    setProductError("");
+    try {
+      setProduct(await fetchProductAnalytics());
+    } catch (err) {
+      setProduct({ configured: false });
+      setProductError(err instanceof Error ? err.message : "Ne mogu da ucitam PostHog podatke.");
     }
   }, []);
 
@@ -156,6 +256,8 @@ export function StatisticsScreen() {
             </View>
           </Card>
         </View>
+
+        <ProductAnalyticsCard product={product} productError={productError} />
 
         <Card style={styles.wideCard}>
           <SectionTitle eyebrow="Trend" title="Nove registracije (30 dana)" />
@@ -265,6 +367,12 @@ const styles = StyleSheet.create({
   trendBarFill: { width: "100%", borderTopLeftRadius: 4, borderTopRightRadius: 4, minHeight: 3 },
   trendAxisRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },
   trendAxisLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "600" },
+  barsList: { gap: 10 },
+  barsRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  barsLabel: { color: colors.textPrimary, fontSize: 13, fontWeight: "700", flexBasis: 140, flexShrink: 0 },
+  barsTrack: { flex: 1, height: 10, borderRadius: 5, backgroundColor: colors.surfaceMuted, overflow: "hidden" },
+  barsFill: { height: "100%", borderRadius: 5, backgroundColor: colors.accent },
+  barsValue: { color: colors.textMuted, fontSize: 12, fontWeight: "700", flexBasis: 36, textAlign: "right" },
   pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   miniLeagueTable: { gap: 2 },
   miniLeagueRow: {

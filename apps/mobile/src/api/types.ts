@@ -729,3 +729,20 @@ export interface AnalyticsOverview {
     }>;
   };
 }
+
+// Real behavioral data read back from PostHog (see apps/api/src/posthog-analytics.ts) -
+// screen views and active users actually captured client-side, as opposed to
+// AnalyticsOverview above which reports on the app's own DB. `configured: false` means
+// the API server has no POSTHOG_PERSONAL_API_KEY/POSTHOG_PROJECT_ID set yet.
+export type ProductAnalyticsOverview =
+  | { configured: false }
+  | {
+      configured: true;
+      activeUsers7d: number;
+      activeUsers30d: number;
+      totalEvents30d: number;
+      dauPerDay: AnalyticsDailyCount[];
+      screenViewsPerDay: AnalyticsDailyCount[];
+      topScreens: Array<{ screen: string; views: number }>;
+      deviceBreakdown: Array<{ device: string; users: number }>;
+    };

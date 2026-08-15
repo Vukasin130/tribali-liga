@@ -129,6 +129,7 @@ import {
   updateOwnProfile
 } from "./verification.ts";
 import { getAnalyticsOverview } from "./analytics.ts";
+import { getProductAnalyticsOverview } from "./posthog-analytics.ts";
 import { createUploadTarget } from "./uploads.ts";
 import { getLiveOverview, getRealtimeConfig } from "./realtime.ts";
 import { registerPushToken, sendAdminBroadcast } from "./push.ts";
@@ -290,6 +291,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/admin/analytics/overview" && req.method === "GET") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await getAnalyticsOverview() });
+      return;
+    }
+
+    if (url.pathname === "/admin/analytics/product" && req.method === "GET") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await getProductAnalyticsOverview() });
       return;
     }
 

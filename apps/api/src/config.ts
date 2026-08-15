@@ -35,6 +35,15 @@ export const config = {
     adminEmail: (process.env.ADMIN_EMAIL || "admin@urbanfantasy.rs").toLowerCase(),
     adminPassword: process.env.ADMIN_PASSWORD || ""
   },
+  posthog: {
+    // Personal API Key (server-side only, never sent to the client) - reads real
+    // product-usage data back out of PostHog for the admin Statistika screen. Separate
+    // from EXPO_PUBLIC_POSTHOG_API_KEY (apps/mobile and apps/desktop's own .env), which
+    // is the write-only project token used to send events in.
+    personalApiKey: process.env.POSTHOG_PERSONAL_API_KEY || "",
+    projectId: process.env.POSTHOG_PROJECT_ID || "",
+    apiHost: process.env.POSTHOG_API_HOST || "https://us.posthog.com"
+  },
   runtime: {
     isProduction: process.env.NODE_ENV === "production"
   }

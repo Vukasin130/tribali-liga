@@ -1,6 +1,7 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./client";
 import type {
   AnalyticsOverview,
+  ProductAnalyticsOverview,
   AuthSession,
   AuthUser,
   City,
@@ -555,4 +556,8 @@ export function fetchCompetitionStandings(competitionId: string) {
 
 export function fetchAnalyticsOverview() {
   return apiGet<AnalyticsOverview>("/admin/analytics/overview");
+}
+
+export function fetchProductAnalytics() {
+  return apiGet<ProductAnalyticsOverview>("/admin/analytics/product");
 }
