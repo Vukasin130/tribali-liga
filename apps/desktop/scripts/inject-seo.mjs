@@ -13,7 +13,7 @@ import { dirname, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const indexPath = resolve(__dirname, "../dist/index.html");
 
-const SITE_URL = "https://tribali-liga-1.onrender.com";
+const SITE_URL = "https://tribaliliga.com";
 const TITLE = "Tribali Liga";
 const DESCRIPTION =
   "Fantasy liga amaterskog fudbala - prati svoj tim, live utakmice, tabele i vesti gradskih liga na jednom mestu.";
