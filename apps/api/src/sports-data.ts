@@ -591,22 +591,25 @@ export async function updateTeam(id: string, payload: TeamPayload, actor: Actor)
     ]
   );
   await audit(actor, "team.update", "team", id, { name: result.rows[0].name });
-  if (payload.logoUrl !== undefined && result.rows[0].club_id) {
-    const trimmedLogo = String(payload.logoUrl || "").trim();
+  // The club is the persistent identity - but match/fixture lists across the whole
+  // codebase (availability.ts, competition-builder.ts, matches-db.ts, season-hub.ts,
+  // sports-data.ts) all read name/logo directly off each *team* row for that
+  // competition, not off clubs. A club that has played across multiple seasons has one
+  // teams row per competition, all sharing this club_id. Updating only the shared club
+  // row (previous fix) still left every *other* season's own teams row - and every
+  // fixture card that reads it - showing the old name/logo. Renaming here now cascades
+  // to the club record AND every sibling teams row for that club, so this reads
+  // correctly everywhere immediately, not just on the one instance actually edited.
+  if (result.rows[0].club_id) {
+    const trimmedLogo = payload.logoUrl !== undefined ? String(payload.logoUrl || "").trim() : "";
+    const trimmedName = payload.name !== undefined ? String(payload.name || "").trim() : "";
     if (trimmedLogo) {
       await query("update public.clubs set logo_url = $2, updated_at = now() where id = $1", [result.rows[0].club_id, trimmedLogo]);
+      await query("update public.teams set logo_url = $2, updated_at = now() where club_id = $1", [result.rows[0].club_id, trimmedLogo]);
     }
-  }
-  // The club is the persistent identity (Explore's team browser, and every other
-  // season this club has played under, all read clubs.name) - teams.name is just this
-  // one competition instance's record. Renaming a team here is how an admin actually
-  // renames the club (sponsor change, rebrand), same reasoning already applied to
-  // logoUrl above; without this, Explore kept showing the old name indefinitely since
-  // it was reading from a row this edit never touched.
-  if (payload.name !== undefined && result.rows[0].club_id) {
-    const trimmedName = String(payload.name || "").trim();
     if (trimmedName) {
       await query("update public.clubs set name = $2, updated_at = now() where id = $1", [result.rows[0].club_id, trimmedName]);
+      await query("update public.teams set name = $2, updated_at = now() where club_id = $1", [result.rows[0].club_id, trimmedName]);
     }
   }
   await syncFantasyPoolForTeam(result.rows[0].id, actor);
