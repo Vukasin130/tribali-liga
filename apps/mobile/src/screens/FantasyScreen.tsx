@@ -216,6 +216,9 @@ export function FantasyScreen() {
     try {
       const result = await syncFantasySeasonPool(season.id);
       setSyncMessage(`Sinhronizovano: ${result.available} igraca dostupno, ${result.unavailable} uklonjeno.`);
+      // Sync writes straight to the DB - reload so "Igraci u bazi" reflects it
+      // immediately instead of showing whatever was loaded before the click.
+      await load();
     } catch (err) {
       setAdminError(err instanceof ApiError ? err.message : "Sinhronizacija fantasy baze nije uspela.");
     } finally {
