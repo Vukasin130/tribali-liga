@@ -97,6 +97,8 @@ import {
   getTeamProfile,
   listCities,
   listClubs,
+  deleteClub,
+  getClubDeletionImpact,
   listCompetitionTeams,
   listCompetitions,
   listPlayers,
@@ -313,6 +315,20 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/clubs" && req.method === "GET") {
       sendJson(res, 200, { ok: true, data: await listClubs({ search: url.searchParams.get("search") || "" }) });
+      return;
+    }
+
+    const adminClubDeletionImpactMatch = url.pathname.match(/^\/admin\/clubs\/([^/]+)\/deletion-impact$/);
+    if (adminClubDeletionImpactMatch && req.method === "GET") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await getClubDeletionImpact(adminClubDeletionImpactMatch[1]) });
+      return;
+    }
+
+    const adminClubMatch = url.pathname.match(/^\/admin\/clubs\/([^/]+)$/);
+    if (adminClubMatch && req.method === "DELETE") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await deleteClub(adminClubMatch[1], sessionUser) });
       return;
     }
 

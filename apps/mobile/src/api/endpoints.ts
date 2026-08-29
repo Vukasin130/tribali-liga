@@ -6,6 +6,7 @@ import type {
   AuthUser,
   City,
   Club,
+  ClubDeletionImpact,
   Competition,
   CompetitionSetup,
   FantasyMiniLeague,
@@ -173,6 +174,14 @@ export function createTeam(payload: { competitionId?: string; name: string; shor
 export function fetchClubs(search?: string) {
   const qs = search ? `?search=${encodeURIComponent(search)}` : "";
   return apiGet<Club[]>(`/clubs${qs}`);
+}
+
+export function fetchClubDeletionImpact(clubId: string) {
+  return apiGet<ClubDeletionImpact>(`/admin/clubs/${clubId}/deletion-impact`);
+}
+
+export function deleteClub(clubId: string) {
+  return apiDelete<ClubDeletionImpact>(`/admin/clubs/${clubId}`);
 }
 
 export function addClubToCompetition(

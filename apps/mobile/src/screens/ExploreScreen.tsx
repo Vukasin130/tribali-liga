@@ -12,6 +12,7 @@ import { useCompetition } from "../state/CompetitionContext";
 import { TeamProfileModal } from "./TeamProfileModal";
 import { PlayerProfileModal } from "./PlayerProfileModal";
 import { TeamComposerModal } from "./TeamComposerModal";
+import { ClubDeleteConfirmModal } from "./ClubDeleteConfirmModal";
 import { SponsorStrip } from "../components/SponsorStrip";
 import { TeamCrest } from "../components/TeamCrest";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
@@ -43,6 +44,7 @@ export function ExploreScreen() {
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
   const [showTeamComposer, setShowTeamComposer] = useState(false);
+  const [clubToDelete, setClubToDelete] = useState<Club | null>(null);
 
   useEffect(() => {
     if (statsCompetitionId || competitions.length === 0) return;
@@ -248,6 +250,21 @@ export function ExploreScreen() {
                     {club.competitionsCount > 1 ? ` - ${club.competitionsCount} liga` : ""}
                   </Text>
                 </View>
+                {isAdmin ? (
+                  <TouchableOpacity
+                    style={styles.deleteClubButton}
+                    onPress={(event) => {
+                      // RN's native touch responder system doesn't bubble the way DOM
+                      // does (only one touchable wins), but react-native-web's onPress
+                      // does dispatch a real DOM event - stopPropagation is only
+                      // present/needed there, guard it so this doesn't throw on native.
+                      event?.stopPropagation?.();
+                      setClubToDelete(club);
+                    }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                  </TouchableOpacity>
+                ) : null}
               </TouchableOpacity>
             ))}
           </View>
@@ -307,6 +324,17 @@ export function ExploreScreen() {
           onClose={() => setShowTeamComposer(false)}
           onSaved={() => {
             setShowTeamComposer(false);
+            clubsQuery.refetch();
+          }}
+        />
+      ) : null}
+      {clubToDelete ? (
+        <ClubDeleteConfirmModal
+          clubId={clubToDelete.id}
+          clubName={clubToDelete.name}
+          onClose={() => setClubToDelete(null)}
+          onDeleted={() => {
+            setClubToDelete(null);
             clubsQuery.refetch();
           }}
         />
@@ -447,6 +475,7 @@ const styles = StyleSheet.create({
   searchAvatarSquare: { borderRadius: 12, backgroundColor: colors.aqua },
   searchAvatarText: { color: "#fff", fontWeight: "700" },
   searchInfo: { flex: 1 },
+  deleteClubButton: { padding: 6 },
   searchName: { color: colors.textPrimary, fontWeight: "700", fontSize: 15 },
   searchMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   leaderRow: {

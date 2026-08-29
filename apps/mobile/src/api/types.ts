@@ -513,6 +513,20 @@ export interface Club {
   teams: PlayerTeamRef[];
 }
 
+// A club with history across seasons has one teams row per competition it's played
+// in - these counts are summed across every one of them, so this reflects everything
+// deleting this club would actually affect, not just whichever instance is showing.
+export interface ClubDeletionImpact {
+  clubId: string;
+  clubName: string;
+  teamInstances: number;
+  matchesPlayed: number;
+  rosterEntries: number;
+  playerSeasonStatsRows: number;
+  playerMatchStatsRows: number;
+  standingsRows: number;
+}
+
 export interface PlayerTeamRef {
   teamId: string;
   teamName: string;

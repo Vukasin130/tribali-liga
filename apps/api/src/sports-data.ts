@@ -768,6 +768,54 @@ export async function listClubs(filters: { search?: string } = {}) {
   return clubs.map((club) => ({ ...club, teams: teamsByClub.get(club.id) || [] }));
 }
 
+// A club that has played across multiple seasons has one teams row per competition
+// (see updateTeam's rename/logo cascade) - a dry-run summary aggregated across every
+// one of them, so deleting "this club" from Explore reads as one real number, not a
+// count for whichever single instance happened to be clicked.
+export async function getClubDeletionImpact(clubId: string) {
+  const club = await query("select id, name from public.clubs where id = $1", [clubId]);
+  if (!club.rows[0]) throw httpError(404, "Klub nije pronadjen.");
+
+  const teamIds = await query("select id from public.teams where club_id = $1", [clubId]);
+  const ids: string[] = teamIds.rows.map((row) => row.id);
+
+  const zeroImpact = { matchesPlayed: 0, rosterEntries: 0, playerSeasonStatsRows: 0, playerMatchStatsRows: 0, standingsRows: 0 };
+  const counts = ids.length
+    ? await (async () => {
+        const [matches, roster, seasonStats, matchStats, standings] = await Promise.all([
+          query("select count(*)::int as n from public.matches where home_team_id = any($1::uuid[]) or away_team_id = any($1::uuid[])", [ids]),
+          query("select count(*)::int as n from public.team_rosters where team_id = any($1::uuid[])", [ids]),
+          query("select count(*)::int as n from public.player_season_stats where team_id = any($1::uuid[])", [ids]),
+          query("select count(*)::int as n from public.player_match_stats where team_id = any($1::uuid[])", [ids]),
+          query("select count(*)::int as n from public.team_standings where team_id = any($1::uuid[])", [ids])
+        ]);
+        return {
+          matchesPlayed: matches.rows[0].n,
+          rosterEntries: roster.rows[0].n,
+          playerSeasonStatsRows: seasonStats.rows[0].n,
+          playerMatchStatsRows: matchStats.rows[0].n,
+          standingsRows: standings.rows[0].n
+        };
+      })()
+    : zeroImpact;
+
+  return { clubId, clubName: club.rows[0].name, teamInstances: ids.length, ...counts };
+}
+
+export async function deleteClub(clubId: string, actor: Actor) {
+  const impact = await getClubDeletionImpact(clubId);
+  await audit(actor, "club.delete", "club", clubId, impact);
+  // Every teams row for this club goes first - team_rosters/player_season_stats/
+  // player_match_stats/team_standings cascade at the DB level per row; matches.*
+  // team_id columns go to SET NULL (the match and its score survive, it just loses
+  // which team played it). Deleting only one instance and leaving the club record
+  // would leave the other seasons' rows as orphaned zombies still showing this
+  // "deleted" club everywhere else - it has to go as one unit.
+  await query("delete from public.teams where club_id = $1", [clubId]);
+  await query("delete from public.clubs where id = $1", [clubId]);
+  return impact;
+}
+
 async function findOrCreateClub({ name, shortName, logoUrl, cityId }: { name: string; shortName?: string; logoUrl?: string; cityId?: string | null }) {
   const normalized = requiredText(name, "Naziv kluba je obavezan.");
   const existing = await query("select * from public.clubs where lower(trim(name)) = lower(trim($1)) limit 1", [normalized]);
