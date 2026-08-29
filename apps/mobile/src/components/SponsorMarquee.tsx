@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, Linking, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Animated, Easing, Image, Linking, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { fetchGeneralSponsors } from "../api/endpoints";
 import type { Sponsor } from "../api/types";
 import { colors } from "../theme/colors";
@@ -42,18 +42,21 @@ export function SponsorMarquee() {
 
   return (
     <View style={styles.wrap}>
-      <Animated.View style={[styles.track, { transform: [{ translateX }] }]}>
-        <View style={styles.set} onLayout={(e) => setSetWidth(e.nativeEvent.layout.width)}>
-          {sponsors.map((sponsor) => (
-            <SponsorLogo key={sponsor.id} sponsor={sponsor} />
-          ))}
-        </View>
-        <View style={styles.set}>
-          {sponsors.map((sponsor) => (
-            <SponsorLogo key={`${sponsor.id}-loop`} sponsor={sponsor} />
-          ))}
-        </View>
-      </Animated.View>
+      <Text style={styles.label}>Nasi sponzori</Text>
+      <View style={styles.track}>
+        <Animated.View style={[styles.trackInner, { transform: [{ translateX }] }]}>
+          <View style={styles.set} onLayout={(e) => setSetWidth(e.nativeEvent.layout.width)}>
+            {sponsors.map((sponsor) => (
+              <SponsorLogo key={sponsor.id} sponsor={sponsor} />
+            ))}
+          </View>
+          <View style={styles.set}>
+            {sponsors.map((sponsor) => (
+              <SponsorLogo key={`${sponsor.id}-loop`} sponsor={sponsor} />
+            ))}
+          </View>
+        </Animated.View>
+      </View>
     </View>
   );
 }
@@ -77,13 +80,18 @@ function SponsorLogo({ sponsor }: { sponsor: Sponsor }) {
 }
 
 const styles = StyleSheet.create({
+  // Was overlapping the hero gradient with a negative margin and no label at all -
+  // just three logos floating with nothing explaining what they were. Now a proper
+  // labeled section sitting in the normal (light) body flow, matching the "Nasi
+  // sponzori" treatment used everywhere else sponsors appear (see SponsorStrip).
   wrap: {
-    height: LOGO_HEIGHT,
-    marginHorizontal: 20,
-    marginTop: -14,
-    overflow: "hidden"
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    gap: 8
   },
-  track: { flexDirection: "row" },
+  label: { color: colors.textMuted, fontWeight: "700", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 },
+  track: { height: LOGO_HEIGHT, overflow: "hidden" },
+  trackInner: { flexDirection: "row" },
   set: { flexDirection: "row", alignItems: "center", paddingHorizontal: GAP / 2 },
   logoWrap: {
     width: LOGO_WIDTH,
