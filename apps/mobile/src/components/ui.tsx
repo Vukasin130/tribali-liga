@@ -49,9 +49,17 @@ export function PrimaryButton({
   );
 }
 
-export function Pill({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "success" | "warning" | "danger" | "live" }) {
+export function Pill({
+  label,
+  tone = "neutral",
+  style
+}: {
+  label: string;
+  tone?: "neutral" | "success" | "warning" | "danger" | "live";
+  style?: StyleProp<ViewStyle>;
+}) {
   return (
-    <View style={[styles.pill, pillTone[tone]]}>
+    <View style={[styles.pill, pillTone[tone], style]}>
       <Text style={[styles.pillText, pillTextTone[tone]]}>{label}</Text>
     </View>
   );

@@ -166,7 +166,9 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
                 <Text style={styles.metaLine}>
                   {[profile.city?.name, profile.competition?.name].filter(Boolean).join(" - ")}
                 </Text>
-                {profile.achievement ? <Pill label={profile.achievement} tone="warning" /> : null}
+                {profile.achievement ? (
+                  <Pill label={profile.achievement} tone="warning" style={styles.achievementPill} />
+                ) : null}
 
                 <View style={styles.pointsBadge}>
                   <Ionicons name="trophy" size={14} color={colors.ink} />
@@ -499,6 +501,10 @@ const styles = StyleSheet.create({
   crestInitials: { color: "#fff", fontSize: 46, fontWeight: "800" },
   name: { color: "#fff", fontSize: 30, fontWeight: "900", textAlign: "center" },
   metaLine: { color: "rgba(255,255,255,0.82)", fontWeight: "700", textAlign: "center", marginBottom: 4 },
+  // Pill defaults to alignSelf: "flex-start" (it's normally used inline next to a
+  // title, e.g. FantasyScreen's status pill) - here it's the only thing in this
+  // centered hero column, so it needs to actually center itself too.
+  achievementPill: { alignSelf: "center" },
   pointsBadge: {
     flexDirection: "row",
     alignItems: "center",
