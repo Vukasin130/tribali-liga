@@ -375,6 +375,19 @@ export async function addClubToCompetition(competitionId: string, payload: { clu
         );
         playersCount += 1;
       }
+
+      // source.competition_id is null only for a club's standalone registration team
+      // (TeamComposerModal's "Nova ekipa" flow, saved with no competition to add it to
+      // yet - see createTeam). That row's one job was to hold a roster until the club's
+      // first real competition entry; now that its players live on newTeam too, retire
+      // it so it stops shadowing newTeam everywhere a player's teams get listed (was
+      // showing as a permanent duplicate with a blank league/season - see attachTeams).
+      // A real prior-season team (competition_id set) is left alone - it stays
+      // available as the roster source for yet another future competition.
+      if (source.competition_id === null) {
+        await client.query("update public.teams set is_active = false, updated_at = now() where id = $1", [source.id]);
+        await client.query("update public.team_rosters set is_active = false where team_id = $1", [source.id]);
+      }
     }
 
     await auditWithClient(client, actor, "competition.teams.add-from-club", "competition", competitionId, {

@@ -299,13 +299,17 @@ async function attachTeams<T extends { id: string }>(players: T[]) {
   // one(s) - dropping a player from an old team (tr.is_active = false, see
   // removePlayerFromTeam) must never make that season's history unreachable from
   // their own profile. isActive is still exposed so the UI can tell current from past.
+  // "competition_id is not null" excludes a club's standalone registration team
+  // (see TeamComposerModal's "Nova ekipa" flow) - it's a one-time placeholder with
+  // no season of its own, so it isn't real history, just a duplicate of whichever
+  // real per-competition team addClubToCompetition later copied its roster into.
   const result = await query(
     `select tr.player_id, tr.is_active as roster_active, t.id as team_id, t.name as team_name, t.short_name as team_short_name,
             c.id as competition_id, c.name as competition_name, c.season_name
      from public.team_rosters tr
      join public.teams t on t.id = tr.team_id
      left join public.competitions c on c.id = t.competition_id
-     where tr.player_id = any($1::uuid[])
+     where tr.player_id = any($1::uuid[]) and t.competition_id is not null
      order by coalesce(c.starts_at, c.created_at) desc`,
     [ids]
   );
