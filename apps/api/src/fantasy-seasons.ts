@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { query, transaction } from "./db.ts";
-import { sendAutomaticNotification } from "./push.ts";
+import { sendAutomaticNotification, sendNotificationToProfiles } from "./push.ts";
 import { httpError } from "./errors.ts";
 import { requiredText } from "./validation.ts";
 import type { Actor } from "./types.ts";
@@ -318,7 +318,50 @@ export async function setFantasyPoolPlayerPrice(seasonId: string, playerId: stri
   );
   if (!result.rows[0]) throw httpError(404, "Igrac nije pronadjen u fantazi pulu ove sezone.");
   await audit(actor, "fantasy.season.pool.price", "fantasyPlayerPool", result.rows[0].id, { playerId, price, lock });
+  // A hand-set price (unlike the automatic per-round movement, which shifts every
+  // owning team's budget_cap to compensate - see scoreFantasySeasonGameweek) can jump
+  // however far an admin wants in one step, which could retroactively push an already-
+  // saved squad over budget. A team must never be allowed to sit over budget, so any
+  // squad this specific change breaks gets cancelled outright rather than quietly
+  // rescued - same as if the manager tried to save it fresh right now.
+  await cancelOverBudgetTeamPicks(seasonId, actor);
   return getPoolPlayerRow(seasonId, playerId);
+}
+
+// Clears the current-squad picks (only in gameweeks still open for editing - a locked
+// or finished round is already-played history and is never rewritten) of any team in
+// this season whose total spend now exceeds its budget_cap. Safe to call after any
+// price change: a team that's still within budget is never touched.
+async function cancelOverBudgetTeamPicks(seasonId: string, actor: Actor | null): Promise<void> {
+  const overBudget = await query<{ team_id: string; fantasy_gameweek_id: string; user_id: string; team_name: string }>(
+    `select ft.id as team_id, ftp.fantasy_gameweek_id, ft.user_id, ft.name as team_name
+     from public.fantasy_teams ft
+     join public.fantasy_team_picks ftp on ftp.fantasy_team_id = ft.id
+     join public.fantasy_gameweeks gw on gw.id = ftp.fantasy_gameweek_id and gw.status in ('draft', 'open')
+     join public.fantasy_player_pool fpp on fpp.player_id = ftp.player_id and fpp.fantasy_season_id = ft.fantasy_season_id
+     where ft.fantasy_season_id = $1
+     group by ft.id, ftp.fantasy_gameweek_id, ft.user_id, ft.name, ft.budget_cap
+     having sum(fpp.current_price) > ft.budget_cap`,
+    [seasonId]
+  );
+  for (const row of overBudget.rows) {
+    await query("delete from public.fantasy_team_picks where fantasy_team_id = $1 and fantasy_gameweek_id = $2", [
+      row.team_id,
+      row.fantasy_gameweek_id
+    ]);
+    await audit(actor, "fantasy.season.team.cancel-over-budget", "fantasyTeam", row.team_id, {
+      fantasyGameweekId: row.fantasy_gameweek_id
+    });
+  }
+  const affectedUserIds = [...new Set(overBudget.rows.map((row) => row.user_id))];
+  if (affectedUserIds.length) {
+    await sendNotificationToProfiles(
+      affectedUserIds,
+      "Tvoj fantazi tim je resetovan",
+      "Cena nekog od tvojih igraca je promenjena i tvoj tim je presao budzet, pa je resetovan - sastavi ga ponovo.",
+      { kind: "fantasy_team_reset" }
+    );
+  }
 }
 
 // Admin accept/reject for the pool - syncFantasySeasonPool re-marks a player
