@@ -151,8 +151,11 @@ describe("runFantasyGameweekSweep", () => {
       assert.equal(before[0].status, "finished");
 
       // A new, earlier match lands in the same already-finished week - if the guard
-      // didn't hold, this would shift the round's recorded locks_at backward.
-      await createTestMatch(tracker, competitionId, home, away, daysFromNow(-22), { status: "finished" });
+      // didn't hold, this would shift the round's recorded locks_at backward. Offset by
+      // hours rather than a full day so this stays in the same Monday-Sunday week no
+      // matter which weekday the suite happens to run on (a full day earlier crossed
+      // into the previous week whenever "today" was a Monday).
+      await createTestMatch(tracker, competitionId, home, away, hoursFromNow(-21 * 24 - 2), { status: "finished" });
       await runFantasyGameweekSweep();
 
       const after = await fetchGameweeksForSeason(seasonId);

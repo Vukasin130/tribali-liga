@@ -560,7 +560,10 @@ export function FantasyScreen() {
           ? (["team", "pool", "leaderboard", "admin"] as Tab[])
           : (["team", "pool", "leaderboard"] as Tab[])
         ).map((value) => {
-          const locked = !isAdmin && (value === "team" || value === "pool");
+          // Driven by real season state, not a role - each lock clears itself the moment
+          // the underlying data shows up (pool synced, first round opened by the
+          // automatic sweep), with no manual step required.
+          const locked = (value === "team" && !gameweek) || (value === "pool" && pool.length === 0);
           return (
             <TouchableOpacity key={value} style={[styles.tabButton, tab === value ? styles.tabButtonActive : null]} onPress={() => setTab(value)}>
               {locked ? (
@@ -578,18 +581,11 @@ export function FantasyScreen() {
       >
         {error ? <ErrorState message={error} onRetry={load} /> : null}
 
-        {tab === "team" && !isAdmin ? (
-          <LockedComingSoonCard
-            title="Moj tim uskoro stize"
-            copy="Pravljenje fantasy tima ce biti dostupno cim zvanicna baza ekipa i igraca bude spremna za novu sezonu."
-          />
+        {tab === "team" && !gameweek ? (
+          <EmptyState message="Sezona uskoro pocinje. Vrati se kada krene prvo kolo." />
         ) : null}
 
-        {tab === "team" && isAdmin && !gameweek ? (
-          <EmptyState message="Sezona uskoro pocinje. Vrati se kada admin otvori prvo kolo." />
-        ) : null}
-
-        {tab === "team" && isAdmin && gameweek ? (
+        {tab === "team" && gameweek ? (
           <View style={[styles.section, isWide ? styles.teamSectionWide : null]}>
             {isAdmin ? (
               <View style={styles.hintCard}>
@@ -715,14 +711,7 @@ export function FantasyScreen() {
           </View>
         ) : null}
 
-        {tab === "pool" && !isAdmin ? (
-          <LockedComingSoonCard
-            title="Igraci uskoro stizu"
-            copy="Lista igraca ce biti dostupna cim zvanicna baza ekipa i igraca bude spremna za novu sezonu."
-          />
-        ) : null}
-
-        {tab === "pool" && isAdmin ? (
+        {tab === "pool" ? (
           <View style={styles.section}>
             <TextInput
               style={styles.searchInput}
@@ -1143,26 +1132,6 @@ export function FantasyScreen() {
   );
 }
 
-// Same "locked, coming soon" treatment as the Gol nedelje card on News - the tab stays
-// visible (with a lock icon) so fans know the feature exists, but the real screen only
-// works once there's a real team/player database to build a fantasy squad from.
-function LockedComingSoonCard({ title, copy }: { title: string; copy: string }) {
-  return (
-    <Card style={styles.lockedCard}>
-      <View style={styles.lockedHead}>
-        <SectionTitle eyebrow="Fantasy" title={title} />
-        <Pill label="Uskoro" tone="warning" />
-      </View>
-      <View style={styles.lockedBody}>
-        <View style={styles.lockedIconWrap}>
-          <Ionicons name="lock-closed" size={18} color={colors.purple} />
-        </View>
-        <Text style={styles.lockedCopy}>{copy}</Text>
-      </View>
-    </Card>
-  );
-}
-
 function PoolAvatar({ avatarUrl, teamId }: { avatarUrl?: string; teamId: string }) {
   const [failed, setFailed] = useState(false);
   if (avatarUrl && !failed) {
@@ -1287,18 +1256,6 @@ const styles = StyleSheet.create({
   },
   hintTitle: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
   hintText: { color: colors.textMuted, fontSize: 12, marginTop: 4, lineHeight: 17 },
-  lockedCard: { gap: 10 },
-  lockedHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  lockedBody: { flexDirection: "row", alignItems: "center", gap: 12 },
-  lockedIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  lockedCopy: { flex: 1, color: colors.textMuted, fontSize: 13, lineHeight: 18, fontWeight: "600" },
   pickInfo: { flex: 1 },
   pickName: { color: colors.textPrimary, fontWeight: "700" },
   pickMeta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
