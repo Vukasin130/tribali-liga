@@ -344,7 +344,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
 
               <View style={styles.heroTeamsRow}>
                 <TouchableOpacity style={styles.heroTeam} onPress={() => setActiveTeamId(detail.homeTeamId)}>
-                  <TeamCrest teamId={detail.homeTeamId} name={detail.homeTeamName} logoUrl={detail.homeTeamLogoUrl} size={52} />
+                  <TeamCrest teamId={detail.homeTeamId} name={detail.homeTeamName} logoUrl={detail.homeTeamLogoUrl} size={68} />
                   <Text style={styles.heroTeamName} numberOfLines={2}>{detail.homeTeamName}</Text>
                 </TouchableOpacity>
                 <View style={styles.heroCenter}>
@@ -360,11 +360,11 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                       <Text style={styles.liveClockText}>{formatClock(liveSeconds)}</Text>
                     </View>
                   ) : (
-                    <Pill label={statusLabel(detail.status)} tone={isPlayed ? "success" : "neutral"} />
+                    <Pill label={statusLabel(detail.status)} tone={isPlayed ? "success" : "neutral"} style={styles.heroStatusPill} />
                   )}
                 </View>
                 <TouchableOpacity style={styles.heroTeam} onPress={() => setActiveTeamId(detail.awayTeamId)}>
-                  <TeamCrest teamId={detail.awayTeamId} name={detail.awayTeamName} logoUrl={detail.awayTeamLogoUrl} size={52} />
+                  <TeamCrest teamId={detail.awayTeamId} name={detail.awayTeamName} logoUrl={detail.awayTeamLogoUrl} size={68} />
                   <Text style={styles.heroTeamName} numberOfLines={2}>{detail.awayTeamName}</Text>
                 </TouchableOpacity>
               </View>
@@ -958,11 +958,15 @@ const styles = StyleSheet.create({
   iconButtonSpacer: { width: 36, height: 36 },
   heroBadgeText: { color: "rgba(255,255,255,0.85)", fontWeight: "700", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.4 },
   heroTeamsRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 },
-  heroTeam: { flex: 1, alignItems: "center", gap: 6 },
-  heroTeamName: { color: "#fff", fontWeight: "800", fontSize: 12, textAlign: "center" },
+  heroTeam: { flex: 1, alignItems: "center", gap: 8 },
+  heroTeamName: { color: "#fff", fontWeight: "800", fontSize: 14, textAlign: "center" },
   heroCenter: { width: 110, alignItems: "center", gap: 6 },
   heroScore: { color: "#fff", fontWeight: "900", fontSize: 28 },
   heroMeta: { color: "rgba(255,255,255,0.8)", fontWeight: "600", fontSize: 12, textAlign: "center" },
+  // Pill defaults to alignSelf: "flex-start" for its usual job inline next to a
+  // title - here it's alone in the centered heroCenter column, so it needs to
+  // actually center itself instead of hugging the left edge under the score.
+  heroStatusPill: { alignSelf: "center" },
   liveClockBox: { alignItems: "center", gap: 2 },
   liveClockRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   livePulse: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.live },
