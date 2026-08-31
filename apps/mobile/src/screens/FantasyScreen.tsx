@@ -234,8 +234,8 @@ export function FantasyScreen() {
   async function handleSavePrice(playerId: string) {
     if (!season) return;
     const price = Number(priceDraft.replace(",", "."));
-    if (!Number.isFinite(price) || price < 4 || price > 13) {
-      setAdminError("Cena mora biti broj izmedju 4 i 13.");
+    if (!Number.isFinite(price) || price < 4 || price > 15) {
+      setAdminError("Cena mora biti broj izmedju 4 i 15.");
       return;
     }
     setPriceSaving(true);

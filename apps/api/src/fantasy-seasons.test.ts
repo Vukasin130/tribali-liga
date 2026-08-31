@@ -233,7 +233,7 @@ describe("scoreFantasySeasonGameweek", () => {
 });
 
 describe("setFantasyPoolPlayerPrice / setFantasyPoolPlayerAvailability", () => {
-  test("rejects a price outside the 4-13 range", async () => {
+  test("rejects a price outside the 4-15 range", async () => {
     const tracker = newFixtureTracker();
     try {
       const competitionId = await createTestCompetition(tracker);

@@ -8,7 +8,11 @@ import type { Actor } from "./types.ts";
 const MAX_PICKS = 10;
 const VALID_SEASON_STATUSES = new Set(["draft", "active", "finished"]);
 const MIN_PRICE = 4;
-const MAX_PRICE = 13;
+// Only bounds an admin's own hand-set price (setFantasyPoolPlayerPrice below) - the
+// automatic in-season adjustment (sweepFantasySeasonGameweeks' price-movement query)
+// only floors at MIN_PRICE and is deliberately uncapped above it, so a genuinely
+// in-form player can climb past this all season.
+const MAX_MANUAL_PRICE = 15;
 const PRICE_STEP = 0.1;
 // Starting XI is position-locked: 1 GK + 2 DEF + 2 ATT. The 5-player bench (B1-B5) has no
 // position restriction - any player can fill any bench slot. B1 (the 6th player overall)
@@ -298,8 +302,8 @@ export async function syncFantasySeasonPool(seasonId: string, actor: Actor | nul
 export async function setFantasyPoolPlayerPrice(seasonId: string, playerId: string, payload: { price?: number; isPriceLocked?: boolean }, actor: Actor) {
   await ensureSeasonTx({ query } as unknown as PoolClient, seasonId);
   const price = Number(payload.price);
-  if (!Number.isFinite(price) || price < 4 || price > 13) {
-    throw httpError(400, "Cena mora biti broj izmedju 4 i 13.");
+  if (!Number.isFinite(price) || price < MIN_PRICE || price > MAX_MANUAL_PRICE) {
+    throw httpError(400, `Cena mora biti broj izmedju ${MIN_PRICE} i ${MAX_MANUAL_PRICE}.`);
   }
   const lock = payload.isPriceLocked !== false;
   const result = await query(
@@ -812,7 +816,10 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
        updated as (
          update public.fantasy_player_pool fpp
          set current_price = case
-               when gwp.points > fpp.current_price then least($6::numeric, round(fpp.current_price + $5::numeric, 2))
+               -- Uncapped above MIN_PRICE - a player in real form can climb past
+               -- MAX_MANUAL_PRICE all season, that ceiling only bounds an admin's own
+               -- hand-set starting price (see setFantasyPoolPlayerPrice).
+               when gwp.points > fpp.current_price then round(fpp.current_price + $5::numeric, 2)
                when gwp.points < fpp.current_price then greatest($4::numeric, round(fpp.current_price - $5::numeric, 2))
                else fpp.current_price
              end,
@@ -825,7 +832,7 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
        from updated u
        join movable m on m.id = u.id
        where u.new_price <> m.old_price`,
-      [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP, MAX_PRICE]
+      [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP]
     );
 
     if (priceUpdates.rows.length) {
