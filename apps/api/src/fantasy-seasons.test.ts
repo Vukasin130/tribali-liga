@@ -230,6 +230,51 @@ describe("scoreFantasySeasonGameweek", () => {
       await cleanupTestData(tracker);
     }
   });
+
+  // A match finished directly (setMatchStatus, no lineup or events ever recorded - see
+  // the admin's "unesi konacan rezultat" action) leaves player_match_stats empty for
+  // every player in it. Price movement only ever touches a player through an inner join
+  // against that table, so a player with no recorded stats is skipped entirely rather
+  // than being treated as "0 points" and pushed down toward MIN_PRICE - it's not their
+  // fault the match wasn't tracked individually.
+  test("a match finished with no recorded player stats leaves every price untouched", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const player = await createTestPlayer(tracker, home, "__test__ untracked player");
+      // Mirrors setMatchStatusDb("finished", { homeScore, awayScore }) with no lineup or
+      // events - a final score exists, but public.player_match_stats stays empty.
+      await createTestMatch(tracker, competitionId, home, away, daysFromNow(-1), {
+        status: "finished",
+        homeScore: 5,
+        awayScore: 0
+      });
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      const startingPrice = 8;
+      await setFantasyPoolPlayerPrice(seasonId, player, { price: startingPrice, isPriceLocked: false }, testActor);
+
+      const gameweekId = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-2),
+        locksAt: daysFromNow(-1),
+        endsAt: hoursFromNow(-1)
+      });
+
+      const result = await scoreFantasySeasonGameweek(gameweekId, testActor);
+      assert.equal(result.pricedPlayers, 0);
+
+      const pool = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, player]
+      );
+      assert.equal(Number(pool.rows[0]?.current_price), startingPrice);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
 });
 
 describe("setFantasyPoolPlayerPrice / setFantasyPoolPlayerAvailability", () => {
