@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet,
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchCompetitionStandings, fetchLeaders, fetchMatchDetail, setMatchMedia, submitMatchPrediction, updateMatch } from "../api/endpoints";
+import { fetchCompetitionStandings, fetchLeaders, fetchMatchDetail, setMatchMedia, setMatchStatus, submitMatchPrediction, updateMatch } from "../api/endpoints";
 import type { LeaderEntry, MatchDetail, MatchLineupEntry, StandingGroup } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
 import { colors, gradients } from "../theme/colors";
@@ -127,6 +127,10 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
   const [round, setRound] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
+  const [homeScoreInput, setHomeScoreInput] = useState("");
+  const [awayScoreInput, setAwayScoreInput] = useState("");
+  const [settingScore, setSettingScore] = useState(false);
+  const [scoreMessage, setScoreMessage] = useState("");
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [savingMedia, setSavingMedia] = useState(false);
   const [mediaMessage, setMediaMessage] = useState("");
@@ -217,6 +221,35 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
       setSaveMessage(err instanceof Error ? err.message : "Termin nije sacuvan.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  // For a match that was never run through the live-scoring flow at all (a walkover,
+  // or one simply entered after the fact) - lets an admin close it out with a final
+  // score directly, without staging a lineup or pretending to walk it through kickoff.
+  // setMatchStatus already handles everything a live "Zavrsi mec" finish does
+  // (standings, player-season stats, fantasy cascade) - this just skips straight to it.
+  async function handleSetFinalScore() {
+    if (!detail) return;
+    const home = Number(homeScoreInput.trim());
+    const away = Number(awayScoreInput.trim());
+    if (!Number.isInteger(home) || !Number.isInteger(away) || home < 0 || away < 0) {
+      setScoreMessage("Unesi ceo broj golova za oba tima (0 ili vise).");
+      return;
+    }
+    setSettingScore(true);
+    setScoreMessage("");
+    try {
+      const updated = await setMatchStatus(detail.id, "finished", { homeScore: home, awayScore: away });
+      queryClient.setQueryData<MatchDetail>(["matchDetail", matchId], (previous) =>
+        previous ? { ...previous, ...updated } : previous
+      );
+      queryClient.invalidateQueries({ queryKey: ["seasonHub"] });
+      setScoreMessage(`Rezultat je unet: ${home}:${away}.`);
+    } catch (err) {
+      setScoreMessage(err instanceof Error ? err.message : "Rezultat nije unet.");
+    } finally {
+      setSettingScore(false);
     }
   }
 
@@ -505,6 +538,41 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                       </View>
                       {saveMessage ? <Text style={styles.adminMessage}>{saveMessage}</Text> : null}
                       <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj termin"} onPress={handleSaveMatch} loading={saving} />
+                    </Card>
+                  ) : null}
+
+                  {isAdmin && isScheduled ? (
+                    <Card style={{ gap: 10 }}>
+                      <Text style={styles.sectionLabel}>Admin - unesi konacan rezultat</Text>
+                      <Text style={styles.flowCopy}>
+                        Za mec koji se nece voditi uzivo (npr. odigran je van aplikacije, ili je registrovan sluzbeni rezultat) - ovo odmah zavrsava mec sa unetim rezultatom, bez pokretanja live prenosa.
+                      </Text>
+                      <View style={styles.adminRow}>
+                        <TextInput
+                          style={[styles.adminInput, styles.flex1]}
+                          placeholder={detail.homeTeamName}
+                          placeholderTextColor="#9c9186"
+                          keyboardType="number-pad"
+                          value={homeScoreInput}
+                          onChangeText={setHomeScoreInput}
+                        />
+                        <Text style={styles.scoreColon}>:</Text>
+                        <TextInput
+                          style={[styles.adminInput, styles.flex1]}
+                          placeholder={detail.awayTeamName}
+                          placeholderTextColor="#9c9186"
+                          keyboardType="number-pad"
+                          value={awayScoreInput}
+                          onChangeText={setAwayScoreInput}
+                        />
+                      </View>
+                      {scoreMessage ? <Text style={styles.adminMessage}>{scoreMessage}</Text> : null}
+                      <PrimaryButton
+                        label={settingScore ? "Cuvanje..." : "Zavrsi mec sa ovim rezultatom"}
+                        onPress={handleSetFinalScore}
+                        loading={settingScore}
+                        variant="danger"
+                      />
                     </Card>
                   ) : null}
 
@@ -1107,9 +1175,10 @@ const styles = StyleSheet.create({
   leaderName: { color: colors.textPrimary, fontWeight: "700", fontSize: 13 },
   leaderTeam: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
   leaderValue: { color: colors.purple, fontWeight: "900", fontSize: 13 },
-  adminRow: { flexDirection: "row", gap: 8 },
+  adminRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   flex1: { flex: 1 },
   roundInput: { width: 80 },
+  scoreColon: { color: colors.textMuted, fontWeight: "800", fontSize: 16 },
   adminInput: {
     backgroundColor: colors.surfaceMuted,
     borderRadius: 12,
