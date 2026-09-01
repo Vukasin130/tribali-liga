@@ -832,8 +832,8 @@ export function FantasyScreen() {
 
             <Text style={styles.prizeHint}>
               {leaderboardScope === "season"
-                ? "Najboljih 15 na kraju sezone osvaja nagrade."
-                : "Najboljih 5 ovog kola osvaja nagrade."}
+                ? "Najboljih 10 na kraju sezone osvaja nagrade."
+                : "Najbolja 3 ovog kola osvajaju nagrade."}
             </Text>
 
             {leaderboardLoading ? <LoadingState label="Ucitavanje tabele..." /> : null}
@@ -846,7 +846,7 @@ export function FantasyScreen() {
                   key={entry.fantasyTeamId}
                   entry={entry}
                   showTotalPoints={leaderboardScope === "season"}
-                  prizeThreshold={leaderboardScope === "season" ? 15 : 5}
+                  prizeThreshold={leaderboardScope === "season" ? 10 : 3}
                   onPress={() =>
                     setViewingTeam({
                       fantasyTeamId: entry.fantasyTeamId,
