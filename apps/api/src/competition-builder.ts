@@ -784,11 +784,15 @@ async function loadTeamsForPhase(client: PoolClient, competitionId: string, phas
   return rows.rows;
 }
 
-function mondayForRound(startAt: string, round: number): Date {
+// Anchors round 1 on startAt exactly as given - it used to snap back to the Monday of
+// startAt's own week (e.g. an admin picking Tuesday Sept 1 silently got Monday Aug 31
+// instead, with nothing in the UI explaining why), which meant a chosen weekday could
+// never actually be honored. Each later round just steps 7 days from that same anchor,
+// so round-to-round spacing is still an exact calendar week.
+function roundAnchorDate(startAt: string, round: number): Date {
   const date = new Date(startAt);
   if (!Number.isFinite(date.getTime())) throw httpError(400, "Pocetak rasporeda nije validan.");
-  const day = date.getDay() || 7;
-  date.setDate(date.getDate() - day + 1 + (Math.max(1, Number(round) || 1) - 1) * 7);
+  date.setDate(date.getDate() + (Math.max(1, Number(round) || 1) - 1) * 7);
   date.setHours(18, 0, 0, 0);
   return date;
 }
@@ -817,7 +821,7 @@ async function loadUsableSlots(client: PoolClient, competitionId: string, count:
     const round = pairing?.round || 1;
     const roundIndex = roundCounters.get(round) || 0;
     roundCounters.set(round, roundIndex + 1);
-    const weekStart = mondayForRound(startAt, round).getTime();
+    const weekStart = roundAnchorDate(startAt, round).getTime();
     slots.push({
       id: "",
       startsAt: new Date(weekStart + roundIndex * intervalMinutes * 60 * 1000).toISOString(),
