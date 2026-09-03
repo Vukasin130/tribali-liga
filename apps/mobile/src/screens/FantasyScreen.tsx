@@ -771,9 +771,13 @@ export function FantasyScreen() {
                   <TouchableOpacity style={styles.priceAdminWrap} onPress={() => startEditPrice(player)}>
                     {player.isPriceLocked ? <Text style={styles.priceLockIcon}>🔒</Text> : null}
                     <Text style={styles.pickPrice}>{player.currentPrice.toFixed(1)} CR</Text>
+                    <PriceDeltaBadge delta={player.lastPriceDelta} />
                   </TouchableOpacity>
                 ) : (
-                  <Text style={styles.pickPrice}>{player.currentPrice.toFixed(1)} CR</Text>
+                  <View style={styles.priceAdminWrap}>
+                    <Text style={styles.pickPrice}>{player.currentPrice.toFixed(1)} CR</Text>
+                    <PriceDeltaBadge delta={player.lastPriceDelta} />
+                  </View>
                 )}
                 {isAdmin ? (
                   <TouchableOpacity
@@ -1147,6 +1151,21 @@ function PoolAvatar({ avatarUrl, teamId }: { avatarUrl?: string; teamId: string 
   return <View style={[styles.poolFace, { backgroundColor: kitColorForTeam(teamId) }]} />;
 }
 
+// The visible effect of a player's last round on their price - blank when nothing
+// changed (locked, no stats, or exactly flat), otherwise a signed CR move so the pool
+// reads as "what did this player's play just do to their price" rather than a bare number.
+function PriceDeltaBadge({ delta }: { delta: number }) {
+  if (!delta) return null;
+  const rounded = Math.round(delta * 10) / 10;
+  if (rounded === 0) return null;
+  const isUp = rounded > 0;
+  return (
+    <Text style={[styles.priceDelta, isUp ? styles.priceDeltaUp : styles.priceDeltaDown]}>
+      {isUp ? "▲" : "▼"}{Math.abs(rounded).toFixed(1)}
+    </Text>
+  );
+}
+
 function seasonStatusLabel(status: string): string {
   if (status === "active") return "Aktivna";
   if (status === "finished") return "Zavrsena";
@@ -1263,6 +1282,9 @@ const styles = StyleSheet.create({
   pickPrice: { color: colors.pink, fontWeight: "700" },
   priceAdminWrap: { flexDirection: "row", alignItems: "center", gap: 4 },
   priceLockIcon: { fontSize: 11 },
+  priceDelta: { fontSize: 11, fontWeight: "800" },
+  priceDeltaUp: { color: colors.success },
+  priceDeltaDown: { color: colors.danger },
   priceEditRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   priceEditInput: {
     width: 56,

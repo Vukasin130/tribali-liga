@@ -311,6 +311,10 @@ export async function setFantasyPoolPlayerPrice(seasonId: string, playerId: stri
        base_price = $3,
        current_price = $3,
        is_price_locked = $4,
+       -- A manual set is a fresh baseline, not a performance result - clear any
+       -- leftover "this is what last round's play changed" indicator so it doesn't
+       -- misleadingly attribute this override to the player's own action.
+       last_price_delta = 0,
        updated_at = now()
      where fantasy_season_id = $1 and player_id = $2
      returning id`,
@@ -878,6 +882,14 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
       [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP]
     );
 
+    // last_price_delta always reflects just-this-round's movement, not a running total -
+    // reset the whole pool first so a player untouched by this round (no stats, or price
+    // locked) correctly shows "no change" instead of a stale figure from an earlier
+    // round, then stamp the real deltas over it for whoever actually moved.
+    await client.query("update public.fantasy_player_pool set last_price_delta = 0 where fantasy_season_id = $1", [
+      seasonId
+    ]);
+
     if (priceUpdates.rows.length) {
       const playerIds = priceUpdates.rows.map((row) => row.player_id);
       const deltas = priceUpdates.rows.map((row) => Number(row.delta));
@@ -893,6 +905,13 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
          ) moved
          where ft.id = moved.fantasy_team_id`,
         [playerIds, deltas, fantasyGameweekId]
+      );
+      await client.query(
+        `update public.fantasy_player_pool fpp
+         set last_price_delta = pd.delta
+         from unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta)
+         where fpp.fantasy_season_id = $3 and fpp.player_id = pd.player_id`,
+        [playerIds, deltas, seasonId]
       );
     }
 
@@ -1007,7 +1026,15 @@ async function withSeasonTeamDetails(fantasyTeamId: string, fantasyGameweekId?: 
     }
     transferWindow = {
       roundNumber,
-      isUnlimited: UNLIMITED_TRANSFER_ROUNDS.has(roundNumber),
+      // Matches setFantasySeasonPicks' own save-time rule exactly (see
+      // getPreviousGameweekPlayerIds returning null for an empty previous round): a
+      // manager building their very first team - because they missed round 1, joined
+      // late, or the round they'd normally build in has no prior squad to compare
+      // against - has nothing to "transfer" from, so it can't be limited the same way
+      // as an existing squad being edited. Without this, a first-ever team outside
+      // rounds 1/6/11 showed a false 4-transfer cap and got blocked from saving a full
+      // 10-player squad, even though the save endpoint would have allowed it.
+      isUnlimited: UNLIMITED_TRANSFER_ROUNDS.has(roundNumber) || previousPicks.length === 0,
       transfersAllowed: TRANSFERS_PER_ROUND,
       previousPicks,
       phase
@@ -1196,6 +1223,11 @@ function normalizeFantasyPoolPlayer(row: any) {
     avatarUrl: row.avatar_url || "",
     basePrice: Number(row.base_price || 0),
     currentPrice: Number(row.current_price || 0),
+    // How much current_price moved the last time it changed - either the last round's
+    // automatic performance-based movement (scoreFantasySeasonGameweek), or reset to 0
+    // by an admin's own manual price-set (setFantasyPoolPlayerPrice). Lets the pool list
+    // show a player's price action as a visible effect instead of just a bare number.
+    lastPriceDelta: Number(row.last_price_delta || 0),
     isAvailable: row.is_available,
     availabilityNote: row.availability_note || "",
     isPriceLocked: Boolean(row.is_price_locked),

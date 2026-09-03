@@ -13,10 +13,27 @@ export interface TestFixtureIds {
   playerIds: string[];
   matchIds: string[];
   fantasySeasonIds: string[];
+  userIds: string[];
 }
 
 export function newFixtureTracker(): TestFixtureIds {
-  return { competitionIds: [], teamIds: [], playerIds: [], matchIds: [], fantasySeasonIds: [] };
+  return { competitionIds: [], teamIds: [], playerIds: [], matchIds: [], fantasySeasonIds: [], userIds: [] };
+}
+
+// profiles.id has a real FK to auth.users(id) - fantasy_teams.user_id in turn FKs to
+// profiles, so exercising anything that creates/owns a fantasy team (unlike most other
+// fixtures here, which only need an Actor's id for audit logging) needs a genuine row in
+// both tables, not just a bare id.
+export async function createTestUser(tracker: TestFixtureIds, displayName = "__test__ user"): Promise<string> {
+  const authRow = await query<{ id: string }>(`insert into auth.users (id) values (gen_random_uuid()) returning id`);
+  const id = authRow.rows[0].id;
+  await query(`insert into public.profiles (id, email, display_name) values ($1, $2, $3)`, [
+    id,
+    `${id}@__test__.local`,
+    displayName
+  ]);
+  tracker.userIds.push(id);
+  return id;
 }
 
 export async function createTestCompetition(tracker: TestFixtureIds, name = "__test__ competition"): Promise<string> {
@@ -158,5 +175,9 @@ export async function cleanupTestData(tracker: TestFixtureIds): Promise<void> {
   }
   if (tracker.competitionIds.length) {
     await query(`delete from public.competitions where id = any($1::uuid[])`, [tracker.competitionIds]);
+  }
+  if (tracker.userIds.length) {
+    // Cascades to profiles, and from there to any surviving fantasy_teams row.
+    await query(`delete from auth.users where id = any($1::uuid[])`, [tracker.userIds]);
   }
 }

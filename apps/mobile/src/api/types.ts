@@ -370,6 +370,7 @@ export interface FantasySeasonPoolPlayer {
   avatarUrl: string;
   basePrice: number;
   currentPrice: number;
+  lastPriceDelta: number;
   isAvailable: boolean;
   availabilityNote: string;
   isPriceLocked: boolean;

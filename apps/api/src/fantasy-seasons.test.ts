@@ -6,6 +6,7 @@ import {
   scoreFantasySeasonGameweek,
   setFantasyPoolPlayerAvailability,
   setFantasyPoolPlayerPrice,
+  setFantasySeasonPicks,
   syncFantasySeasonPool
 } from "./fantasy-seasons.ts";
 import { query } from "./db.ts";
@@ -19,6 +20,7 @@ import {
   createTestPlayer,
   createTestPlayerMatchStats,
   createTestTeam,
+  createTestUser,
   newFixtureTracker
 } from "./test-helpers.ts";
 import type { Actor } from "./types.ts";
@@ -323,6 +325,77 @@ describe("setFantasyPoolPlayerPrice / setFantasyPoolPlayerAvailability", () => {
 describe("createFantasySeason", () => {
   test("rejects an empty competitionIds list", async () => {
     await assert.rejects(() => createFantasySeason({ name: "__test__ no leagues", competitionIds: [] }, testActor));
+  });
+});
+
+describe("setFantasySeasonPicks", () => {
+  // A manager who joined (or simply never got around to it) after round 1 already
+  // locked has no previous-round picks to compare against - withSeasonTeamDetails used
+  // to compute isUnlimited from the round number alone (only true for rounds 1/6/11),
+  // so their very first team, built in any other round, looked exactly like an existing
+  // squad making 10 transfers and got rejected outright. Building a first team can never
+  // be limited the same way as editing one, in any round.
+  test("a first-ever team built outside rounds 1/6/11 is not treated as a transfer-limited edit", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const gk = await createTestPlayer(tracker, home, "__test__ gk", "golman");
+      const def1 = await createTestPlayer(tracker, home, "__test__ def1", "odbrana");
+      const def2 = await createTestPlayer(tracker, home, "__test__ def2", "odbrana");
+      const att1 = await createTestPlayer(tracker, home, "__test__ att1", "napad");
+      const att2 = await createTestPlayer(tracker, home, "__test__ att2", "napad");
+      const bench = await Promise.all(
+        [1, 2, 3, 4, 5].map((n) => createTestPlayer(tracker, home, `__test__ bench${n}`, "napad"))
+      );
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      // Cheap squad well within the 100 CR default budget cap.
+      for (const playerId of [gk, def1, def2, att1, att2, ...bench]) {
+        await setFantasyPoolPlayerPrice(seasonId, playerId, { price: 4, isPriceLocked: true }, testActor);
+      }
+
+      // Round 1 already locked in the past - this user never touched it - and round 2
+      // is the currently-open round they're building their first-ever team in.
+      await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-14),
+        locksAt: daysFromNow(-13),
+        endsAt: daysFromNow(-7),
+        status: "finished"
+      });
+      const round2Id = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-6),
+        locksAt: hoursFromNow(6),
+        endsAt: daysFromNow(1),
+        status: "open"
+      });
+
+      const userId = await createTestUser(tracker, "__test__ latecomer");
+      const actor: Actor = { id: userId, role: "fan" };
+
+      const result = await setFantasySeasonPicks(actor, {
+        fantasySeasonId: seasonId,
+        fantasyGameweekId: round2Id,
+        picks: [
+          { playerId: gk, slot: "GK", isCaptain: true },
+          { playerId: def1, slot: "DEF1" },
+          { playerId: def2, slot: "DEF2" },
+          { playerId: att1, slot: "ATT1" },
+          { playerId: att2, slot: "ATT2" },
+          { playerId: bench[0], slot: "B1" },
+          { playerId: bench[1], slot: "B2" },
+          { playerId: bench[2], slot: "B3" },
+          { playerId: bench[3], slot: "B4" },
+          { playerId: bench[4], slot: "B5" }
+        ]
+      });
+
+      assert.equal(result.transferWindow?.isUnlimited, true);
+      assert.equal(result.picks.length, 10);
+    } finally {
+      await cleanupTestData(tracker);
+    }
   });
 });
 
