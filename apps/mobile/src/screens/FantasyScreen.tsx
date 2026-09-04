@@ -317,6 +317,16 @@ export function FantasyScreen() {
   const transfersRemaining =
     transferWindow && !transferWindow.isUnlimited ? Math.max(0, transferWindow.transfersAllowed - transfersUsed) : null;
 
+  // The most recently locked/finished round - i.e. one that has actually started, as
+  // opposed to the newly-opened round most managers haven't touched yet. Used so the
+  // leaderboard's "view a manager's team" drill-down always has a real, scored squad to
+  // show instead of a brand-new round's still-empty one (see its onPress below).
+  const lastCompletedGameweek = useMemo(() => {
+    const played = (season?.gameweeks ?? []).filter((gw) => gw.status === "locked" || gw.status === "finished");
+    if (!played.length) return null;
+    return [...played].sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime())[0];
+  }, [season]);
+
   // Prices + a manual transfer window are only meaningful while the round hasn't started yet.
   // Once it starts (reposition or fully locked), the panel automatically switches to showing
   // points instead of price/budget - no separate manual toggle needed.
@@ -854,7 +864,10 @@ export function FantasyScreen() {
                   onPress={() =>
                     setViewingTeam({
                       fantasyTeamId: entry.fantasyTeamId,
-                      gameweekId: leaderboardScope === "season" ? gameweek?.id : leaderboardScope,
+                      // The season scope has no single "round" of its own - show whichever
+                      // round last actually started, not the newly-opened one most managers
+                      // haven't set a team for yet (see lastCompletedGameweek above).
+                      gameweekId: leaderboardScope === "season" ? lastCompletedGameweek?.id : leaderboardScope,
                       managerName: entry.managerName
                     })
                   }
