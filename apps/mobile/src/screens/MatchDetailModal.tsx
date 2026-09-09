@@ -318,9 +318,12 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
   const playerStats = detail?.playerStats ?? [];
   const sumStat = (teamId: string, field: (typeof STAT_ROWS)[number]["field"]) =>
     playerStats.filter((stat) => stat.teamId === teamId).reduce((total, stat) => total + Number(stat[field] || 0), 0);
-  // Only while live does the pitch swap shirt numbers for a running points tally -
-  // mirrors the admin's own live-scoring pitch (LiveMatchAdminModal's LivePhase).
-  const pointsByPlayer = isLive ? new Map(playerStats.map((stat) => [stat.playerId, stat.fantasyPoints])) : null;
+  // The pitch swaps shirt numbers for points once there's a real match to show the
+  // effect of - both while live (a running tally, mirroring the admin's own
+  // live-scoring pitch in LiveMatchAdminModal) and once it's finished (the final
+  // achieved points, which matter even more after the match is over).
+  const pointsByPlayer =
+    isLive || isPlayed ? new Map(playerStats.map((stat) => [stat.playerId, stat.fantasyPoints])) : null;
 
   const competitionId = detail?.competitionId;
   const tabelaQuery = useQuery({
