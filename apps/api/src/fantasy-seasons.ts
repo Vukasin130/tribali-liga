@@ -604,9 +604,16 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
     }
   }
 
+  // Excludes only a round that's genuinely settled (finished AND its own window has
+  // actually passed) - not every round already marked "finished", because the old,
+  // now-fixed per-match live-scoring hook used to flip a round to "finished" the moment
+  // its first match finished, even while its window (ends_at) was still open and other
+  // matches in it hadn't been played yet. A round wrongly marked finished that way is
+  // self-healed here: it's reconsidered every pass just like any other open round, until
+  // its window actually closes and it earns "finished" for real.
   const rounds = await query(
     `select id, locks_at, ends_at, status from public.fantasy_gameweeks
-     where fantasy_season_id = $1 and status != 'finished'`,
+     where fantasy_season_id = $1 and not (status = 'finished' and ends_at <= now())`,
     [seasonId]
   );
   const now = Date.now();

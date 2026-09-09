@@ -168,6 +168,39 @@ describe("runFantasyGameweekSweep", () => {
       await cleanupTestData(tracker);
     }
   });
+
+  // Regression test for the same bug as scoreFantasySeasonGameweek's "hasn't ended yet"
+  // test above, seen from the sweep's side: a round the old per-match live-scoring hook
+  // wrongly flipped to "finished" before its window actually closed used to be permanently
+  // excluded from reconsideration (the sweep only ever looked at status != 'finished'
+  // rounds), so it could never self-correct even once its window did close for real. The
+  // sweep now excludes a round only once it's *both* finished and its window has passed.
+  test("a round wrongly marked finished before its window closed is un-finished and reconsidered", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      await createTestMatch(tracker, competitionId, home, away, daysFromNow(-1), { status: "finished" });
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+
+      const gameweekId = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-2),
+        locksAt: daysFromNow(-1),
+        endsAt: daysFromNow(3),
+        status: "finished"
+      });
+
+      await runFantasyGameweekSweep();
+
+      const gameweek = await query<{ status: string }>(`select status from public.fantasy_gameweeks where id = $1`, [
+        gameweekId
+      ]);
+      assert.equal(gameweek.rows[0]?.status, "locked");
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
 });
 
 describe("scoreFantasySeasonGameweek", () => {
