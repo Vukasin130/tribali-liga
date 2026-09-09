@@ -233,6 +233,55 @@ describe("scoreFantasySeasonGameweek", () => {
     }
   });
 
+  // A gameweek's matches can span several days (different teams play on different days
+  // of the same round) - scoring is fired live after every single match finishes, not
+  // just once by the sweep at the very end. Regression test for a real bug: scoring used
+  // to finalize the WHOLE round (lock it forever + move every price) the moment the
+  // first match of a multi-day round finished, even though the round's own window
+  // (ends_at) hadn't closed yet and other matches in it were still to be played.
+  test("scoring a round whose window hasn't ended yet updates points live but leaves prices and status alone", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const star = await createTestPlayer(tracker, home, "__test__ star");
+      // This match (yesterday) already finished, but the round it belongs to also
+      // covers a second match-day tomorrow (endsAt in the future) - the round is still
+      // being played out, not over.
+      const matchId = await createTestMatch(tracker, competitionId, home, away, daysFromNow(-1), { status: "finished" });
+      await createTestPlayerMatchStats(matchId, home, star, { fantasyPoints: 12 });
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      const poolBefore = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, star]
+      );
+
+      const gameweekId = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-2),
+        locksAt: daysFromNow(-1),
+        endsAt: daysFromNow(1),
+        status: "locked"
+      });
+
+      const result = await scoreFantasySeasonGameweek(gameweekId, testActor);
+      assert.equal(result.pricedPlayers, 0);
+
+      const gameweeks = await fetchGameweeksForSeason(seasonId);
+      assert.equal(gameweeks[0]?.status, "locked");
+
+      const poolAfter = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, star]
+      );
+      assert.equal(Number(poolAfter.rows[0]?.current_price), Number(poolBefore.rows[0]?.current_price));
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
   // A match finished directly (setMatchStatus, no lineup or events ever recorded - see
   // the admin's "unesi konacan rezultat" action) leaves player_match_stats empty for
   // every player in it. Price movement only ever touches a player through an inner join

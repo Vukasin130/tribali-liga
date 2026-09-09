@@ -768,6 +768,15 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
     if (!gameweek) throw httpError(404, "Fantasy kolo nije pronadjeno.");
     const seasonId = gameweek.fantasy_season_id;
     const windowEnd = gameweek.ends_at || gameweek.locks_at;
+    // A gameweek's matches can span several days across different teams (this call is
+    // also fired eagerly after every single match finishes, live, via
+    // syncFantasySeasonsForMatch - not just once by the sweep after the round is truly
+    // over). Only once the round's own window has actually closed is this a final
+    // settlement: locking the round and moving prices before every match in it has been
+    // played would freeze transfers and shift prices off of a partial, still-changing
+    // picture. Before that point this still recomputes points every time (so standings
+    // stay live throughout the round), it just stops short of finalizing.
+    const roundEnded = new Date(windowEnd).getTime() <= Date.now();
 
     // Guards against the single most destructive mistake here: scoring (which
     // also locks every pick for this round) before any real match has
@@ -833,15 +842,25 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
     );
 
     // Automatic scoring is the terminal step now - there's no separate manual "mark
-    // finished" action left, so go straight there instead of parking at 'scoring'.
-    await client.query("update public.fantasy_gameweeks set status = 'finished', updated_at = now() where id = $1", [fantasyGameweekId]);
+    // finished" action left, so go straight there instead of parking at 'scoring'. But
+    // only once the round has actually ended (see roundEnded above) - otherwise this
+    // just refreshed live points from whichever match triggered it, and the round stays
+    // open/locked for the sweep (or the next match) to revisit.
+    if (roundEnded) {
+      await client.query("update public.fantasy_gameweeks set status = 'finished', updated_at = now() where id = $1", [
+        fantasyGameweekId
+      ]);
+    }
 
     // Captures each mover's old price alongside its new one (via the `movable` CTE,
     // read before `updated` applies the change) so the exact per-player delta is known -
     // that delta is what also has to flow into the budget_cap of every team that owns
     // the player, or a manager's own unchanged squad would silently exceed their budget
-    // the next time prices move.
-    const priceUpdates = await client.query(
+    // the next time prices move. Runs only once the round is truly over (roundEnded) -
+    // otherwise a round with several match-days would nudge every player's price again
+    // after each one instead of moving it once for the round as a whole.
+    const priceUpdates = roundEnded
+      ? await client.query(
       `with season_competitions as (
          select competition_id from public.fantasy_season_competitions where fantasy_season_id = $1
        ),
@@ -879,44 +898,48 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
        from updated u
        join movable m on m.id = u.id
        where u.new_price <> m.old_price`,
-      [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP]
-    );
+          [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP]
+        )
+      : { rows: [] as { player_id: string; delta: number }[] };
 
-    // last_price_delta always reflects just-this-round's movement, not a running total -
-    // reset the whole pool first so a player untouched by this round (no stats, or price
-    // locked) correctly shows "no change" instead of a stale figure from an earlier
-    // round, then stamp the real deltas over it for whoever actually moved.
-    await client.query("update public.fantasy_player_pool set last_price_delta = 0 where fantasy_season_id = $1", [
-      seasonId
-    ]);
+    if (roundEnded) {
+      // last_price_delta always reflects just-this-round's movement, not a running total -
+      // reset the whole pool first so a player untouched by this round (no stats, or price
+      // locked) correctly shows "no change" instead of a stale figure from an earlier
+      // round, then stamp the real deltas over it for whoever actually moved.
+      await client.query("update public.fantasy_player_pool set last_price_delta = 0 where fantasy_season_id = $1", [
+        seasonId
+      ]);
 
-    if (priceUpdates.rows.length) {
-      const playerIds = priceUpdates.rows.map((row) => row.player_id);
-      const deltas = priceUpdates.rows.map((row) => Number(row.delta));
-      await client.query(
-        `update public.fantasy_teams ft
-         set budget_cap = ft.budget_cap + moved.delta_sum, updated_at = now()
-         from (
-           select ftp.fantasy_team_id, sum(pd.delta) as delta_sum
-           from public.fantasy_team_picks ftp
-           join unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta) on pd.player_id = ftp.player_id
-           where ftp.fantasy_gameweek_id = $3
-           group by ftp.fantasy_team_id
-         ) moved
-         where ft.id = moved.fantasy_team_id`,
-        [playerIds, deltas, fantasyGameweekId]
-      );
-      await client.query(
-        `update public.fantasy_player_pool fpp
-         set last_price_delta = pd.delta
-         from unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta)
-         where fpp.fantasy_season_id = $3 and fpp.player_id = pd.player_id`,
-        [playerIds, deltas, seasonId]
-      );
+      if (priceUpdates.rows.length) {
+        const playerIds = priceUpdates.rows.map((row) => row.player_id);
+        const deltas = priceUpdates.rows.map((row) => Number(row.delta));
+        await client.query(
+          `update public.fantasy_teams ft
+           set budget_cap = ft.budget_cap + moved.delta_sum, updated_at = now()
+           from (
+             select ftp.fantasy_team_id, sum(pd.delta) as delta_sum
+             from public.fantasy_team_picks ftp
+             join unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta) on pd.player_id = ftp.player_id
+             where ftp.fantasy_gameweek_id = $3
+             group by ftp.fantasy_team_id
+           ) moved
+           where ft.id = moved.fantasy_team_id`,
+          [playerIds, deltas, fantasyGameweekId]
+        );
+        await client.query(
+          `update public.fantasy_player_pool fpp
+           set last_price_delta = pd.delta
+           from unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta)
+           where fpp.fantasy_season_id = $3 and fpp.player_id = pd.player_id`,
+          [playerIds, deltas, seasonId]
+        );
+      }
     }
 
     await auditWithClient(client, actor, "fantasy.season.gameweek.score", "fantasyGameweek", fantasyGameweekId, {
       updatedPicks: scoreRows.rowCount,
+      roundEnded,
       pricedPlayers: priceUpdates.rows.length
     });
 

@@ -378,12 +378,16 @@ export async function getPlayerProfile(id: string) {
     // Only from an actually-active fantasy season's pool - a still-draft season's pool
     // (or one this player was never synced into) shouldn't surface a price at all, so
     // the profile can cleanly show "-" instead of a number that doesn't mean anything
-    // yet.
+    // yet. Joins straight on fpp.fantasy_season_id (the pool row's own season), not via
+    // fpp.competition_id -> fantasy_season_competitions - that indirect join matched
+    // every pool row sharing the player's competition regardless of which season it
+    // actually belonged to (e.g. a leftover row from an older season for the same
+    // competition), so "order by fs.updated_at" couldn't reliably pick the right one and
+    // this could surface a stale price that disagreed with the one shown in Fantasy.
     query(
       `select fpp.current_price
        from public.fantasy_player_pool fpp
-       join public.fantasy_season_competitions fsc on fsc.competition_id = fpp.competition_id
-       join public.fantasy_seasons fs on fs.id = fsc.fantasy_season_id
+       join public.fantasy_seasons fs on fs.id = fpp.fantasy_season_id
        where fpp.player_id = $1 and fs.status = 'active'
        order by fs.updated_at desc
        limit 1`,

@@ -124,8 +124,18 @@ export function FantasyScreen() {
 
       const seasonData = await fetchFantasySeason(activeSeasonSummary.id);
       setSeason(seasonData);
+      // The earliest round that hasn't finished yet - not the earliest one still fully
+      // "open" for transfers. A round in progress (its deadline has passed but its
+      // matches haven't all been played - status "locked") has to keep showing here
+      // until it's actually finished, or a manager would get skipped straight to
+      // building next round's team the moment the current one's deadline passes, while
+      // their live round is still being played out. gameweeks is ordered by starts_at,
+      // so this naturally lands on the in-progress round when there is one, and only
+      // advances to the next open round once the current one is done.
       const activeGameweek =
-        seasonData.gameweeks.find((gw) => gw.status === "open" || gw.status === "draft") ?? seasonData.gameweeks[0] ?? null;
+        seasonData.gameweeks.find((gw) => gw.status !== "finished") ??
+        seasonData.gameweeks[seasonData.gameweeks.length - 1] ??
+        null;
       setGameweek(activeGameweek);
 
       const [teamData, poolData] = await Promise.all([
