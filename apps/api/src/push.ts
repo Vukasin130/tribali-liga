@@ -16,6 +16,13 @@ export async function registerPushToken(user: Actor | null, token: unknown): Pro
 // Best-effort: a failed/slow Expo batch never throws for the caller - a broadcast that
 // partially fails should still report what did go out instead of losing the whole send.
 async function deliverToExpo(tokens: string[], title: string, body: string, data: unknown): Promise<number> {
+  // The test suite runs its DB queries against the same real database this API talks to
+  // (no separate test database exists yet) - a test that exercises a notification
+  // trigger (e.g. runFantasyGameweekSweep opening a round) must never actually reach
+  // real users' phones. This was a real incident: running the test suite a few times in
+  // one session sent several genuine "Novo fantazi kolo je otvoreno!" pushes to every
+  // real user, because deliverToExpo had no such guard.
+  if (process.env.NODE_ENV === "test") return tokens.length;
   let sent = 0;
   for (let i = 0; i < tokens.length; i += EXPO_BATCH_SIZE) {
     const batch = tokens.slice(i, i + EXPO_BATCH_SIZE);

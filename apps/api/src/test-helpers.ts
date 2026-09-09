@@ -3,6 +3,16 @@
 // plan this was introduced alongside) rather than going through the HTTP layer, so tests
 // stay focused on the module under test. Every row created here is tagged with a
 // __test__ prefix and tracked so cleanupTestData() can remove exactly what a test made.
+// Marks this as a test run before anything else in the suite can import a module that
+// checks it (e.g. push.ts's deliverToExpo, which refuses to actually call Expo's push API
+// under NODE_ENV=test) - real incident: with no such guard, running this suite a few
+// times in one session sent several genuine "Novo fantazi kolo je otvoreno!" push
+// notifications to every real user, because it exercises runFantasyGameweekSweep (which
+// fires a real notification on a genuinely new round) against the same live database the
+// deployed API itself uses. Every test file imports from here, so setting it here - ahead
+// of any other import - covers the whole suite regardless of how it's invoked.
+process.env.NODE_ENV = "test";
+
 import { query } from "./db.ts";
 
 export { closePool } from "./db.ts";
