@@ -559,6 +559,221 @@ export async function generateCompetitionSchedule(competitionId: string, payload
   return result.map(normalizeMatch);
 }
 
+interface ResumeSchedulePayload {
+  phaseCode?: string;
+  intervalMinutes?: number;
+  startAt?: string;
+  venue?: string;
+}
+
+// For a team joining a "league" phase mid-season (after some rounds have already been
+// played), rather than generateCompetitionSchedule's own "replace" mode, which has no
+// concept of history at all - it would blow away every not-yet-played round and lay down
+// a brand-new from-scratch round robin, almost certainly repeating pairings that already
+// happened in the rounds that WERE played (since it doesn't know about them).
+//
+// This only ever deletes matches that are still status='scheduled' - anything finished or
+// live is completely untouched, including its round numbers, so standings and fantasy
+// scoring for those rounds never move. Every pairing already realized in a finished/live
+// match is treated as permanently consumed and never scheduled again. The new team (and
+// every other still-unplayed pairing) is woven into fresh rounds picking up right after
+// the last already-played round.
+export async function resumeCompetitionSchedule(competitionId: string, payload: ResumeSchedulePayload, actor: Actor) {
+  const phaseCode = String(payload.phaseCode || "regular").trim();
+  const intervalMinutes = integerOrNull(payload.intervalMinutes) || 60;
+  const startAt = requiredText(payload.startAt, "Pocetak novog rasporeda je obavezan.");
+  const venue = String(payload.venue || "").trim();
+
+  const result = await transaction(async (client) => {
+    const phase = await getPhaseByCode(client, competitionId, phaseCode);
+    const teams = await loadTeamsForPhase(client, competitionId, phase);
+    if (teams.length < 2) throw httpError(400, "Za raspored su potrebne bar dve ekipe.");
+
+    const existing = await client.query(
+      `select * from public.matches
+       where competition_id = $1 and coalesce(phase_id::text, '') = coalesce($2::text, '')`,
+      [competitionId, phase.id]
+    );
+
+    const playedPairs = new Set<string>();
+    let lastPlayedRound = 0;
+    for (const row of existing.rows) {
+      if (row.status === "finished" || row.status === "live") {
+        playedPairs.add(pairKey(row.home_team_id, row.away_team_id));
+        lastPlayedRound = Math.max(lastPlayedRound, Number(row.round) || 0);
+      }
+    }
+
+    // Only the not-yet-played future fixture list gets thrown out - the exact same
+    // safety boundary generateCompetitionSchedule's own "replace" mode already relies on.
+    await client.query(
+      `delete from public.matches
+       where competition_id = $1 and coalesce(phase_id::text, '') = coalesce($2::text, '') and status = 'scheduled'`,
+      [competitionId, phase.id]
+    );
+
+    const rounds = buildRemainingRoundRobin(teams, playedPairs);
+    // loadUsableSlots (and the roundAnchorDate it calls) anchors round 1 on startAt and
+    // steps a week per round - it knows nothing about lastPlayedRound, so it's fed a
+    // LOCAL round number (1-based within just this new schedule) for timing purposes;
+    // lastPlayedRound is added back in below only for the round number actually stored
+    // on each match, so it continues on from history instead of colliding with it.
+    const pairingsFlat = rounds.flatMap((round, roundIndex) =>
+      round.map((match) => ({ localRound: roundIndex + 1, home: match.home, away: match.away, groupName: "" }))
+    );
+    const slots = await loadUsableSlots(
+      client,
+      competitionId,
+      pairingsFlat.length,
+      startAt,
+      intervalMinutes,
+      venue,
+      pairingsFlat.map((pairing) => ({ round: pairing.localRound }))
+    );
+    const matches = [];
+
+    for (let index = 0; index < pairingsFlat.length; index += 1) {
+      const pairing = pairingsFlat[index];
+      const slot = slots[index];
+      const saved = await client.query(
+        `insert into public.matches
+           (competition_id, phase_id, home_team_id, away_team_id, phase, group_name, round, scheduled_at, venue, status)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'scheduled')
+         returning *`,
+        [
+          competitionId,
+          phase.id,
+          pairing.home.id,
+          pairing.away.id,
+          phase.type,
+          pairing.groupName || "",
+          lastPlayedRound + pairing.localRound,
+          slot.startsAt,
+          slot.venue || venue
+        ]
+      );
+      matches.push(saved.rows[0]);
+
+      if (slot.id) {
+        await client.query("update public.competition_schedule_slots set is_reserved = true where id = $1", [slot.id]);
+      }
+    }
+
+    await auditWithClient(client, actor, "competition.schedule.resume", "competition", competitionId, {
+      phaseCode,
+      teams: teams.length,
+      lastPlayedRound,
+      newRounds: rounds.length,
+      matches: matches.length
+    });
+
+    return matches;
+  });
+
+  return result.map(normalizeMatch);
+}
+
+function pairKey(aId: string, bId: string): string {
+  return [aId, bId].sort().join("|");
+}
+
+// Schedules every pair of teams that hasn't already played (per alreadyPlayed) into as
+// few future rounds as possible - each round a matching of the teams (partner-less teams
+// bye) with nobody playing twice in the same round and no pairing ever repeated. Used when
+// a team joins mid-season: history's already-realized pairings are passed in as
+// alreadyPlayed so they're never scheduled again, while every other pairing - including
+// every pairing the new team hasn't played yet - is guaranteed to appear exactly once
+// somewhere in the returned rounds.
+function buildRemainingRoundRobin(teams: any[], alreadyPlayed: Set<string>): { home: any; away: any }[][] {
+  const remaining = new Set<string>();
+  for (let i = 0; i < teams.length; i += 1) {
+    for (let j = i + 1; j < teams.length; j += 1) {
+      const key = pairKey(teams[i].id, teams[j].id);
+      if (!alreadyPlayed.has(key)) remaining.add(key);
+    }
+  }
+
+  const remainingCountByTeam = new Map<string, number>(teams.map((team) => [team.id, 0]));
+  for (const key of remaining) {
+    const [a, b] = key.split("|");
+    remainingCountByTeam.set(a, (remainingCountByTeam.get(a) || 0) + 1);
+    remainingCountByTeam.set(b, (remainingCountByTeam.get(b) || 0) + 1);
+  }
+
+  const byTeamId = new Map(teams.map((team) => [team.id, team]));
+  const rounds: { home: any; away: any }[][] = [];
+  // Generous safety cap so a genuinely unsatisfiable input (should never happen for a
+  // real round-robin) fails loudly instead of looping forever.
+  const maxRounds = teams.length * 2 + 4;
+
+  while (remaining.size > 0) {
+    if (rounds.length >= maxRounds) {
+      throw httpError(500, "Ne mogu da rasporedim preostale mecceve - potrebna je rucna intervencija.");
+    }
+    const pairs = buildOneRound(teams, remaining, remainingCountByTeam, new Map());
+    if (!pairs.length) {
+      throw httpError(500, "Ne mogu da rasporedim preostale mecceve - potrebna je rucna intervencija.");
+    }
+    rounds.push(pairs.map(([homeId, awayId]) => ({ home: byTeamId.get(homeId), away: byTeamId.get(awayId) })));
+    for (const [homeId, awayId] of pairs) {
+      const key = pairKey(homeId, awayId);
+      remaining.delete(key);
+      remainingCountByTeam.set(homeId, (remainingCountByTeam.get(homeId) || 0) - 1);
+      remainingCountByTeam.set(awayId, (remainingCountByTeam.get(awayId) || 0) - 1);
+    }
+  }
+  return rounds;
+}
+
+// Builds one round's matching, recursively: whichever available team currently has the
+// most games left overall always plays this round if it possibly can (tries every one of
+// its still-unplayed opponents, keeping whichever choice yields the biggest round once the
+// rest is filled in the same way) - a plain "pick any maximum matching" would happily
+// leave that team resting instead whenever the others alone can already fill the round,
+// which is exactly backwards: a team with many games left and few rounds to fit them in
+// can't afford to ever rest while it still can play, or it gets squeezed into an ugly,
+// fragmented tail of near-empty rounds at the end of the season. Memoized on the exact set
+// of teams still open for this round, since the same subset recurs across branches.
+function buildOneRound(
+  teamsAvailable: any[],
+  remaining: Set<string>,
+  remainingCountByTeam: Map<string, number>,
+  memo: Map<string, [string, string][]>
+): [string, string][] {
+  if (teamsAvailable.length === 0) return [];
+  const memoKey = teamsAvailable
+    .map((team) => team.id)
+    .sort()
+    .join(",");
+  const cached = memo.get(memoKey);
+  if (cached) return cached;
+
+  const priority = [...teamsAvailable].sort(
+    (a, b) => (remainingCountByTeam.get(b.id) || 0) - (remainingCountByTeam.get(a.id) || 0)
+  )[0];
+  const rest = teamsAvailable.filter((team) => team.id !== priority.id);
+  const opponents = rest.filter((team) => remaining.has(pairKey(priority.id, team.id)));
+
+  let result: [string, string][];
+  if (!opponents.length) {
+    // Nobody left for the priority team to play this round - it rests, same rule applies
+    // to whoever's next most constrained among everyone else.
+    result = buildOneRound(rest, remaining, remainingCountByTeam, memo);
+  } else {
+    let best: [string, string][] = [];
+    for (const opponent of opponents) {
+      const withoutBoth = rest.filter((team) => team.id !== opponent.id);
+      const subMatching = buildOneRound(withoutBoth, remaining, remainingCountByTeam, memo);
+      if (subMatching.length + 1 > best.length) {
+        best = [[priority.id, opponent.id], ...subMatching];
+      }
+    }
+    result = best;
+  }
+  memo.set(memoKey, result);
+  return result;
+}
+
 export async function prepareKnockoutPhase(competitionId: string, payload: any, actor: Actor) {
   const phaseCode = String(payload.phaseCode || "knockout").trim();
   const qualifiersCount = integerOrNull(payload.qualifiersCount) || integerOrNull(payload.teamsCount) || 8;
