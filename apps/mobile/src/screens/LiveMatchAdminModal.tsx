@@ -173,6 +173,7 @@ export function LiveMatchAdminModal({
 
   const [liveMatches, setLiveMatches] = useState<MatchSummary[]>([]);
   const [scheduledMatches, setScheduledMatches] = useState<MatchSummary[]>([]);
+  const [finishedMatches, setFinishedMatches] = useState<MatchSummary[]>([]);
   const [setupError, setSetupError] = useState("");
   const [setupBusy, setSetupBusy] = useState(false);
 
@@ -222,6 +223,7 @@ export function LiveMatchAdminModal({
     if (!competitionId) {
       setTeams([]);
       setScheduledMatches([]);
+      setFinishedMatches([]);
       return;
     }
     fetchCompetitionTeams(competitionId)
@@ -232,8 +234,21 @@ export function LiveMatchAdminModal({
       })
       .catch((err) => setSetupError(err instanceof Error ? err.message : "Ne mogu da ucitam ekipe."));
     fetchSeasonHub(competitionId)
-      .then((hub) => setScheduledMatches(hub.matches.filter((match) => match.status === "scheduled")))
-      .catch(() => setScheduledMatches([]));
+      .then((hub) => {
+        setScheduledMatches(hub.matches.filter((match) => match.status === "scheduled"));
+        // Most-recent-first, capped short - this is for catching a just-made mistake
+        // (e.g. an accidental finish), not for browsing the whole season's results.
+        setFinishedMatches(
+          hub.matches
+            .filter((match) => match.status === "finished")
+            .sort((a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime())
+            .slice(0, 8)
+        );
+      })
+      .catch(() => {
+        setScheduledMatches([]);
+        setFinishedMatches([]);
+      });
   }, [competitionId]);
 
   const selectedPlayer = players.find((player) => player.id === selectedPlayerId) ?? null;
@@ -637,6 +652,7 @@ export function LiveMatchAdminModal({
             error={setupError}
             liveMatches={liveMatches}
             scheduledMatches={scheduledMatches}
+            finishedMatches={finishedMatches}
             onResume={handleResumeMatch}
             onClose={handleClose}
           />
@@ -780,6 +796,7 @@ function SetupPhase({
   error,
   liveMatches,
   scheduledMatches,
+  finishedMatches,
   onResume,
   onClose
 }: {
@@ -800,6 +817,7 @@ function SetupPhase({
   error: string;
   liveMatches: MatchSummary[];
   scheduledMatches: MatchSummary[];
+  finishedMatches: MatchSummary[];
   onResume: (match: MatchSummary) => void;
   onClose: () => void;
 }) {
@@ -861,6 +879,16 @@ function SetupPhase({
           )}
         </View>
 
+        {finishedMatches.length > 0 ? (
+          <View style={styles.field}>
+            <Text style={styles.label}>Nedavno zavrsene utakmice</Text>
+            <Text style={styles.hintText}>Otvori jednu ako treba da ispravis rezultat ili vratis mec u toku (pogresno zavrsen).</Text>
+            {finishedMatches.map((match) => (
+              <MatchResumeRow key={match.id} match={match} tone="finished" onPress={() => onResume(match)} />
+            ))}
+          </View>
+        ) : null}
+
         <View style={styles.field}>
           <Text style={styles.label}>Ili napravi vanrednu utakmicu</Text>
           <Text style={styles.hintText}>Domacin</Text>
@@ -911,7 +939,15 @@ function SetupPhase({
   );
 }
 
-function MatchResumeRow({ match, tone, onPress }: { match: MatchSummary; tone: "live" | "scheduled"; onPress: () => void }) {
+function MatchResumeRow({
+  match,
+  tone,
+  onPress
+}: {
+  match: MatchSummary;
+  tone: "live" | "scheduled" | "finished";
+  onPress: () => void;
+}) {
   return (
     <TouchableOpacity style={styles.resumeRow} onPress={onPress}>
       <View style={styles.resumeCrests}>
@@ -925,11 +961,13 @@ function MatchResumeRow({ match, tone, onPress }: { match: MatchSummary; tone: "
       <View style={styles.flex1}>
         <Text style={styles.resumeTitle}>{match.homeTeamName} vs {match.awayTeamName}</Text>
         <Text style={styles.resumeMeta}>
-          {tone === "live" ? `${match.homeScore} : ${match.awayScore}` : formatMatchDate(match.scheduledAt)}
+          {tone === "scheduled" ? formatMatchDate(match.scheduledAt) : `${match.homeScore} : ${match.awayScore}`}
           {match.competitionName ? ` · ${match.competitionName}` : ""}
         </Text>
       </View>
-      {tone === "live" ? <Pill label="LIVE" tone="live" /> : <Ionicons name="play-circle-outline" size={26} color={colors.purple} />}
+      {tone === "live" ? <Pill label="LIVE" tone="live" /> : null}
+      {tone === "finished" ? <Pill label="ZAVRSENO" tone="neutral" /> : null}
+      {tone === "scheduled" ? <Ionicons name="play-circle-outline" size={26} color={colors.purple} /> : null}
     </TouchableOpacity>
   );
 }
