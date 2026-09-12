@@ -175,14 +175,26 @@ async function logoutSupabaseUser(token: string) {
   return { loggedOut: true };
 }
 
-// Always reports success regardless of whether the email is registered - never let a
-// "forgot password" form reveal which addresses have accounts. Supabase's own recovery
-// email (default template) carries both a link and a 6-digit code, so the app never
-// needs to send email itself.
+// Always reports success to the CALLER regardless of whether the email is registered -
+// never let a "forgot password" form reveal which addresses have accounts. Supabase's own
+// recovery email (default template) carries both a link and a 6-digit code, so the app
+// never needs to send email itself.
+//
+// The real failure this used to hide completely: Supabase's built-in mailer (no custom
+// SMTP configured) enforces a very low hourly send rate, so under any real load some
+// reset requests silently never send an email at all - and with the old
+// ".catch(() => undefined)" swallowing everything, that failure was invisible even to us,
+// let alone diagnosable from a user's "nothing happened" report. Still returns {ok:true}
+// either way (the client must never be able to tell success from failure here), but now
+// actually logs what Supabase said, so a pattern of failures shows up in the server log
+// instead of just user complaints.
 async function requestSupabasePasswordReset(payload: { email?: string }) {
   const email = normalizeEmail(payload.email);
   if (!email) throw httpError(400, "Email je obavezan.");
-  await supabasePublic().auth.resetPasswordForEmail(email).catch(() => undefined);
+  const { error } = await supabasePublic().auth.resetPasswordForEmail(email);
+  if (error) {
+    console.error(`Password reset email failed for ${email}:`, error.message || error);
+  }
   return { ok: true };
 }
 
