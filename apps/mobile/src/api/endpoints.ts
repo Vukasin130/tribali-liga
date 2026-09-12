@@ -221,6 +221,13 @@ export function setMatchPeriod(matchId: string, period: "first_half" | "halftime
   return apiPatch<MatchDetail>(`/admin/matches/${matchId}/period`, { period });
 }
 
+// Undoes an accidental "finish" (e.g. the full-time button tapped by mistake moments
+// after kickoff) - puts the match back live in whichever period it actually was in,
+// clock and all, exactly as if the finish never happened.
+export function reopenMatch(matchId: string) {
+  return apiPost<MatchDetail>(`/admin/matches/${matchId}/reopen`, {});
+}
+
 export function setMatchMedia(matchId: string, payload: { kind?: string; label?: string; url: string }) {
   return apiPatch<MediaLink>(`/admin/matches/${matchId}/media`, payload);
 }

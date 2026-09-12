@@ -42,6 +42,7 @@ import {
   getMatchDetail,
   listLiveMatches,
   setMatchMedia,
+  reopenMatch,
   setMatchPeriod,
   setMatchStatus,
   submitMatchPrediction,
@@ -996,6 +997,13 @@ const server = http.createServer(async (req, res) => {
     if (adminMatchPeriodMatch && req.method === "PATCH") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await setMatchPeriod(adminMatchPeriodMatch[1], await readJson(req), sessionUser) });
+      return;
+    }
+
+    const adminMatchReopenMatch = url.pathname.match(/^\/admin\/matches\/([^/]+)\/reopen$/);
+    if (adminMatchReopenMatch && req.method === "POST") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await reopenMatch(adminMatchReopenMatch[1], sessionUser) });
       return;
     }
 

@@ -13,6 +13,7 @@ import {
   fetchTeamPlayers,
   listCompetitions,
   listLiveMatches,
+  reopenMatch,
   setMatchLineup,
   setMatchPeriod,
   setMatchStatus,
@@ -575,6 +576,25 @@ export function LiveMatchAdminModal({
     }
   }
 
+  // Undoes an accidental finish (a real incident: the full-time button got tapped by
+  // mistake moments after kickoff, with previously no way back short of a database
+  // fix) - puts the match back live exactly where it actually was, clock included.
+  async function handleReopen() {
+    if (!matchDetail) return;
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const reopened = await reopenMatch(matchDetail.id);
+      setMatchDetail(reopened);
+      setChanged(true);
+      setPhase("live");
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Utakmica nije vracena u toku.");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   function resetToSetup() {
     setMatchDetail(null);
     setPlayers([]);
@@ -666,7 +686,16 @@ export function LiveMatchAdminModal({
           />
         ) : null}
 
-        {phase === "review" && matchDetail ? <ReviewPhase matchDetail={matchDetail} onNewMatch={resetToSetup} onClose={handleClose} /> : null}
+        {phase === "review" && matchDetail ? (
+          <ReviewPhase
+            matchDetail={matchDetail}
+            onNewMatch={resetToSetup}
+            onClose={handleClose}
+            onReopen={handleReopen}
+            reopenBusy={actionBusy}
+            reopenError={actionError}
+          />
+        ) : null}
       </View>
     </Modal>
   );
@@ -1395,7 +1424,21 @@ function LivePhase({
   );
 }
 
-function ReviewPhase({ matchDetail, onNewMatch, onClose }: { matchDetail: MatchDetail; onNewMatch: () => void; onClose: () => void }) {
+function ReviewPhase({
+  matchDetail,
+  onNewMatch,
+  onClose,
+  onReopen,
+  reopenBusy,
+  reopenError
+}: {
+  matchDetail: MatchDetail;
+  onNewMatch: () => void;
+  onClose: () => void;
+  onReopen: () => void;
+  reopenBusy: boolean;
+  reopenError: string;
+}) {
   const isWide = useIsWideScreen();
   const topPerformer = [...matchDetail.playerStats].sort((a, b) => b.fantasyPoints - a.fantasyPoints)[0];
   const events = [...matchDetail.events].sort((a, b) => b.minute - a.minute);
@@ -1430,6 +1473,14 @@ function ReviewPhase({ matchDetail, onNewMatch, onClose }: { matchDetail: MatchD
             </View>
           ))}
         </Card>
+        {reopenError ? <Text style={styles.errorText}>{reopenError}</Text> : null}
+        <PrimaryButton
+          label="Vrati u toku (pogresno zavrseno)"
+          variant="ghost"
+          loading={reopenBusy}
+          disabled={reopenBusy}
+          onPress={onReopen}
+        />
         <PrimaryButton label="Nova utakmica" onPress={onNewMatch} />
         <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
           <Text style={styles.cancelButtonText}>Zatvori</Text>

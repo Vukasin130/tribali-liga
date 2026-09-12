@@ -216,6 +216,56 @@ export async function setMatchStatusDb(matchId: string, payload: SetMatchStatusP
   return getMatchDetailDb(matchId);
 }
 
+// Undoes an accidental "finish" (a real incident: a match barely into its first half got
+// its full-time button tapped by mistake, with no way to continue it afterwards). Only
+// ever a genuine reversal of finishing - it deliberately doesn't accept an arbitrary target
+// status - and restores the exact period the match was actually in when it got finished,
+// not a blank "first_half" restart: it looks up the last kickoff/halftime/second_half
+// event logged before the fulltime one and puts the match back into that period.
+// period_started_at itself was never touched by finishing (setMatchStatusDb only ever
+// forces period, not the clock anchor), so restoring period alone resumes the live clock
+// exactly as if the accidental finish had never happened - no elapsed time is lost.
+export async function reopenMatchDb(matchId: string, actor: Actor) {
+  await transaction(async (client) => {
+    const current = await client.query("select id, competition_id, status from public.matches where id = $1", [matchId]);
+    if (!current.rows[0]) throw httpError(404, "Utakmica nije pronadjena.");
+    if (current.rows[0].status !== "finished") {
+      throw httpError(400, "Samo zavrsena utakmica moze da se vrati u toku.");
+    }
+
+    const lastPeriodEvent = await client.query(
+      `select type from public.match_events
+       where match_id = $1 and type in ('kickoff', 'halftime', 'second_half')
+       order by created_at desc
+       limit 1`,
+      [matchId]
+    );
+    const eventTypeToPeriod: Record<string, string> = {
+      kickoff: "first_half",
+      halftime: "halftime",
+      second_half: "second_half"
+    };
+    const restoredPeriod = eventTypeToPeriod[lastPeriodEvent.rows[0]?.type as string] || "first_half";
+
+    // The fulltime event this created is a record of a finish that, as of this call,
+    // never really happened - remove it so the timeline doesn't keep a phantom "match
+    // ended" entry once play resumes.
+    await client.query(`delete from public.match_events where match_id = $1 and type = 'fulltime'`, [matchId]);
+
+    await client.query(
+      `update public.matches set status = 'live', period = $2, updated_at = now() where id = $1`,
+      [matchId, restoredPeriod]
+    );
+
+    await recalculateCompetitionStandings(client, current.rows[0].competition_id);
+    await recalculatePlayerSeasonStats(client, current.rows[0].competition_id);
+    return current.rows[0];
+  });
+
+  await audit(actor, "match.reopen", "match", matchId, {});
+  return getMatchDetailDb(matchId);
+}
+
 // Advances the match clock: first_half/second_half anchor period_started_at (so
 // the elapsed minute keeps ticking from there), halftime just freezes it in
 // place. Each transition also logs the matching system event (kickoff/halftime/

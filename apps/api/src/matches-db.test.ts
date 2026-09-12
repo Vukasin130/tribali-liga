@@ -5,6 +5,7 @@ import {
   addMatchEventDb,
   getMatchDetailDb,
   listLiveMatchesDb,
+  reopenMatchDb,
   setMatchPeriodDb,
   setMatchStatusDb,
   submitMatchPredictionDb,
@@ -171,6 +172,86 @@ describe("setMatchStatusDb", () => {
   test("rejects a match id that does not exist", async () => {
     await assert.rejects(
       () => setMatchStatusDb(randomUUID(), { status: "live" }, testActor),
+      (error: any) => {
+        assert.equal(error.statusCode, 404);
+        return true;
+      }
+    );
+  });
+});
+
+describe("reopenMatchDb", () => {
+  // The real incident this exists for: an admin's finger slipped and finished a match
+  // that had barely kicked off, with previously no way to undo it - the match was
+  // permanently stuck read-only in the "review" screen.
+  test("undoes an accidental finish, restoring first_half and resuming the same clock", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+
+      await setMatchPeriodDb(matchId, { period: "first_half" }, testActor);
+      const kickoffAnchor = await fetchPeriodStartedAt(matchId);
+
+      const finished = await setMatchStatusDb(matchId, { status: "finished", homeScore: 0, awayScore: 0 }, testActor);
+      assert.equal(definedEvents(finished.events).filter((e) => e.type === "fulltime").length, 1);
+
+      const reopened = await reopenMatchDb(matchId, testActor);
+      assert.equal(reopened.status, "live");
+      // The phantom "match ended" entry is gone, and the clock's anchor is untouched -
+      // same kickoff time as before, not reset to 0'.
+      assert.equal(definedEvents(reopened.events).filter((e) => e.type === "fulltime").length, 0);
+      assert.equal(await fetchPeriodStartedAt(matchId), kickoffAnchor);
+
+      const standings = await fetchStandings(competitionId);
+      const home = standings.find((row) => row.team_id === homeTeamId);
+      assert.equal(home?.played, 0, "a reopened match should no longer count in standings");
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("restores second_half, not first_half, when that's what was actually being played", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+
+      await setMatchPeriodDb(matchId, { period: "first_half" }, testActor);
+      await setMatchPeriodDb(matchId, { period: "halftime" }, testActor);
+      await setMatchPeriodDb(matchId, { period: "second_half" }, testActor);
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 1 }, testActor);
+
+      const reopened = await reopenMatchDb(matchId, testActor);
+      const periodRow = await query<{ period: string }>("select period from public.matches where id = $1", [matchId]);
+      assert.equal(periodRow.rows[0]?.period, "second_half");
+      assert.equal(reopened.status, "live");
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects reopening a match that isn't finished", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+
+      await assert.rejects(
+        () => reopenMatchDb(matchId, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects a match id that does not exist", async () => {
+    await assert.rejects(
+      () => reopenMatchDb(randomUUID(), testActor),
       (error: any) => {
         assert.equal(error.statusCode, 404);
         return true;
