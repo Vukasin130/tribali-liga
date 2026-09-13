@@ -24,7 +24,8 @@ const VALID_EVENT_TYPES = new Set([
   "red_card",
   "substitution",
   "halftime",
-  "fulltime"
+  "fulltime",
+  "clean_sheet"
 ]);
 
 const STAT_RULES: Record<string, { field: string; amount: number; fantasy: number }> = {
@@ -39,6 +40,14 @@ const STAT_RULES: Record<string, { field: string; amount: number; fantasy: numbe
   yellow_card: { field: "yellow_cards", amount: 1, fantasy: -1 },
   red_card: { field: "red_cards", amount: 1, fantasy: -3 }
 };
+
+// Awarded once, automatically, when a match finishes (see setMatchStatusDb) - not a
+// button an admin presses. Every player actually in a team's lineup for the match gets
+// it if that team didn't concede - both teams on a 0-0. Only ever applies to a match
+// that had a real lineup built (RosterPhase): a match finished through the quick "enter
+// final score" shortcut has no lineup rows for either team, so there's no one on record
+// to credit.
+const CLEAN_SHEET_BONUS = 2;
 
 export async function listLiveMatchesDb() {
   const result = await query(matchBaseSql("where m.status = 'live' order by m.scheduled_at"));
@@ -187,16 +196,43 @@ export async function setMatchStatusDb(matchId: string, payload: SetMatchStatusP
          away_score = coalesce($4, away_score),
          updated_at = now()
        where id = $1
-       returning id, competition_id, scheduled_at`,
+       returning id, competition_id, scheduled_at, home_team_id, away_team_id`,
       [matchId, status, payload.homeScore !== undefined ? finalHomeScore : null, payload.awayScore !== undefined ? finalAwayScore : null]
     );
     if (!updated.rows[0]) throw httpError(404, "Utakmica nije pronadjena.");
     if (status === "finished" && !wasAlreadyFinished) {
+      const eventMinute = Math.min(130, Math.max(0, finishMinute));
       await client.query(
         `insert into public.match_events (match_id, minute, type, score_home, score_away)
          values ($1, $2, 'fulltime', $3, $4)`,
-        [matchId, Math.min(130, Math.max(0, finishMinute)), finalHomeScore, finalAwayScore]
+        [matchId, eventMinute, finalHomeScore, finalAwayScore]
       );
+
+      const cleanSheetTeamIds: string[] = [];
+      if (finalAwayScore === 0) cleanSheetTeamIds.push(updated.rows[0].home_team_id);
+      if (finalHomeScore === 0) cleanSheetTeamIds.push(updated.rows[0].away_team_id);
+      if (cleanSheetTeamIds.length) {
+        const squad = await client.query(
+          `select team_id, player_id from public.match_lineups where match_id = $1 and team_id = any($2::uuid[])`,
+          [matchId, cleanSheetTeamIds]
+        );
+        for (const player of squad.rows) {
+          await client.query(
+            `insert into public.match_events
+               (match_id, minute, type, team_id, player_id, score_home, score_away, fantasy_points_delta)
+             values ($1, $2, 'clean_sheet', $3, $4, $5, $6, $7)`,
+            [matchId, eventMinute, player.team_id, player.player_id, finalHomeScore, finalAwayScore, CLEAN_SHEET_BONUS]
+          );
+          await client.query(
+            `insert into public.player_match_stats (match_id, team_id, player_id, fantasy_points)
+             values ($1, $2, $3, $4)
+             on conflict (match_id, player_id) do update set
+               fantasy_points = public.player_match_stats.fantasy_points + excluded.fantasy_points,
+               updated_at = now()`,
+            [matchId, player.team_id, player.player_id, CLEAN_SHEET_BONUS]
+          );
+        }
+      }
     }
     await recalculateCompetitionStandings(client, updated.rows[0].competition_id);
     await recalculatePlayerSeasonStats(client, updated.rows[0].competition_id);

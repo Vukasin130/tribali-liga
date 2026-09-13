@@ -53,7 +53,8 @@ const EVENT_LABELS: Record<string, string> = {
   kickoff: "pocetak utakmice",
   halftime: "kraj prvog poluvremena",
   second_half: "pocetak drugog poluvremena",
-  fulltime: "kraj utakmice"
+  fulltime: "kraj utakmice",
+  clean_sheet: "cista mreza (+2)"
 };
 
 interface RosterPlayer extends Player {

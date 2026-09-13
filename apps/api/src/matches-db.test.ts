@@ -178,6 +178,111 @@ describe("setMatchStatusDb", () => {
       }
     );
   });
+
+  async function fetchFantasyPoints(matchId: string, playerId: string): Promise<number> {
+    const result = await query<{ fantasy_points: number }>(
+      `select fantasy_points from public.player_match_stats where match_id = $1 and player_id = $2`,
+      [matchId, playerId]
+    );
+    return Number(result.rows[0]?.fantasy_points ?? 0);
+  }
+
+  test("a player in the lineup gets +2 for a clean sheet, the conceding side doesn't", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper");
+      const striker = await createTestPlayer(tracker, awayTeamId, "__test__ striker");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await upsertLineupDb(
+        matchId,
+        {
+          players: [
+            { playerId: keeper, teamId: homeTeamId, isStarter: true },
+            { playerId: striker, teamId: awayTeamId, isStarter: true }
+          ]
+        },
+        testActor
+      );
+
+      // Home wins 1-0 - home kept a clean sheet, away conceded.
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+
+      assert.equal(await fetchFantasyPoints(matchId, keeper), 2);
+      assert.equal(await fetchFantasyPoints(matchId, striker), 0);
+
+      const events = await query<{ type: string }>(
+        `select type from public.match_events where match_id = $1 and type = 'clean_sheet'`,
+        [matchId]
+      );
+      assert.equal(events.rowCount, 1);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("both sides get the clean sheet bonus on a 0-0", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const homePlayer = await createTestPlayer(tracker, homeTeamId, "__test__ home player");
+      const awayPlayer = await createTestPlayer(tracker, awayTeamId, "__test__ away player");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await upsertLineupDb(
+        matchId,
+        {
+          players: [
+            { playerId: homePlayer, teamId: homeTeamId, isStarter: true },
+            { playerId: awayPlayer, teamId: awayTeamId, isStarter: true }
+          ]
+        },
+        testActor
+      );
+
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 0, awayScore: 0 }, testActor);
+
+      assert.equal(await fetchFantasyPoints(matchId, homePlayer), 2);
+      assert.equal(await fetchFantasyPoints(matchId, awayPlayer), 2);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("no clean sheet bonus for anyone when the match has no lineup at all", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+
+      // Mirrors the admin's "unesi konacan rezultat" shortcut - no lineup ever built.
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+
+      const events = await query<{ type: string }>(
+        `select type from public.match_events where match_id = $1 and type = 'clean_sheet'`,
+        [matchId]
+      );
+      assert.equal(events.rowCount, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("finishing an already-finished match does not award the clean sheet bonus twice", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await upsertLineupDb(matchId, { players: [{ playerId: keeper, teamId: homeTeamId, isStarter: true }] }, testActor);
+
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+
+      assert.equal(await fetchFantasyPoints(matchId, keeper), 2);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
 });
 
 describe("reopenMatchDb", () => {
