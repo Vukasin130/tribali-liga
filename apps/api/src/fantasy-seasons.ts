@@ -892,19 +892,43 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
     // the next time prices move. Runs only once the round is truly over (roundEnded) -
     // otherwise a round with several match-days would nudge every player's price again
     // after each one instead of moving it once for the round as a whole.
+    //
+    // Every player whose team actually played a finished match in this round moves -
+    // not only whoever happens to have an individually-recorded player_match_stats row.
+    // A match finished through the admin's quick "enter final score" flow (no lineup or
+    // per-player events ever logged) used to leave every one of its players' prices
+    // completely untouched, silently exempting most of the pool most rounds - the rule is
+    // every player, every round, no exceptions, so a played-but-untracked match now
+    // counts as 0 points for its players (coalesced below) rather than skipping them.
     const priceUpdates = roundEnded
       ? await client.query(
       `with season_competitions as (
          select competition_id from public.fantasy_season_competitions where fantasy_season_id = $1
        ),
+       round_matches as (
+         select id, home_team_id, away_team_id
+         from public.matches
+         where competition_id in (select competition_id from season_competitions)
+           and scheduled_at >= $2::timestamptz and scheduled_at <= $3::timestamptz
+           and status = 'finished'
+       ),
+       played_teams as (
+         select home_team_id as team_id from round_matches
+         union
+         select away_team_id as team_id from round_matches
+       ),
+       round_stats as (
+         select player_id, sum(fantasy_points) as points
+         from public.player_match_stats
+         where match_id in (select id from round_matches)
+         group by player_id
+       ),
        gw_points as (
-         select pms.player_id, sum(pms.fantasy_points) as points
-         from public.player_match_stats pms
-         join public.matches m on m.id = pms.match_id
-         where m.competition_id in (select competition_id from season_competitions)
-           and m.scheduled_at >= $2::timestamptz and m.scheduled_at <= $3::timestamptz
-           and m.status = 'finished'
-         group by pms.player_id
+         select fpp.player_id, coalesce(rs.points, 0) as points
+         from public.fantasy_player_pool fpp
+         join played_teams pt on pt.team_id = fpp.team_id
+         left join round_stats rs on rs.player_id = fpp.player_id
+         where fpp.fantasy_season_id = $1
        ),
        movable as (
          select fpp.id, fpp.player_id, fpp.current_price as old_price

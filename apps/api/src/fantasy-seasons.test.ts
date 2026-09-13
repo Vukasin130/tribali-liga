@@ -380,11 +380,10 @@ describe("scoreFantasySeasonGameweek", () => {
 
   // A match finished directly (setMatchStatus, no lineup or events ever recorded - see
   // the admin's "unesi konacan rezultat" action) leaves player_match_stats empty for
-  // every player in it. Price movement only ever touches a player through an inner join
-  // against that table, so a player with no recorded stats is skipped entirely rather
-  // than being treated as "0 points" and pushed down toward MIN_PRICE - it's not their
-  // fault the match wasn't tracked individually.
-  test("a match finished with no recorded player stats leaves every price untouched", async () => {
+  // every player in it. The rule is every player, every round, no exceptions - a match
+  // finished this way now counts as 0 points for everyone on both teams (not skipped),
+  // so their price still moves down like any other round with no return to show for it.
+  test("a match finished with no recorded player stats still moves every player's price down", async () => {
     const tracker = newFixtureTracker();
     try {
       const competitionId = await createTestCompetition(tracker);
@@ -411,11 +410,51 @@ describe("scoreFantasySeasonGameweek", () => {
       });
 
       const result = await scoreFantasySeasonGameweek(gameweekId, testActor);
-      assert.equal(result.pricedPlayers, 0);
+      assert.equal(result.pricedPlayers, 1);
 
       const pool = await query<{ current_price: string }>(
         `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
         [seasonId, player]
+      );
+      assert.equal(Number(pool.rows[0]?.current_price), startingPrice - 0.1);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  // The flip side of the test above: a team with no match at all this round (a bye, or a
+  // league whose fixtures simply haven't reached this week yet) must not be treated as
+  // "0 points" - its players' prices stay untouched, unlike the untracked-but-played case.
+  test("a team with no match at all this round has its players' prices left alone", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const byeTeam = await createTestTeam(tracker, competitionId, "__test__ bye team");
+      const byePlayer = await createTestPlayer(tracker, byeTeam, "__test__ bye player");
+      await createTestMatch(tracker, competitionId, home, away, daysFromNow(-1), {
+        status: "finished",
+        homeScore: 1,
+        awayScore: 1
+      });
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      const startingPrice = 8;
+      await setFantasyPoolPlayerPrice(seasonId, byePlayer, { price: startingPrice, isPriceLocked: false }, testActor);
+
+      const gameweekId = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-2),
+        locksAt: daysFromNow(-1),
+        endsAt: hoursFromNow(-1)
+      });
+
+      await scoreFantasySeasonGameweek(gameweekId, testActor);
+
+      const pool = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, byePlayer]
       );
       assert.equal(Number(pool.rows[0]?.current_price), startingPrice);
     } finally {
