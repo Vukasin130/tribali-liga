@@ -42,11 +42,12 @@ const STAT_RULES: Record<string, { field: string; amount: number; fantasy: numbe
 };
 
 // Awarded once, automatically, when a match finishes (see setMatchStatusDb) - not a
-// button an admin presses. Every player actually in a team's lineup for the match gets
-// it if that team didn't concede - both teams on a 0-0. Only ever applies to a match
-// that had a real lineup built (RosterPhase): a match finished through the quick "enter
-// final score" shortcut has no lineup rows for either team, so there's no one on record
-// to credit.
+// button an admin presses. Every goalkeeper or defender actually in a team's lineup for
+// the match gets it if that team didn't concede - both teams on a 0-0; attackers never
+// get it, same convention as real fantasy football. Only ever applies to a match that
+// had a real lineup built (RosterPhase): a match finished through the quick "enter final
+// score" shortcut has no lineup rows for either team, so there's no one on record to
+// credit.
 const CLEAN_SHEET_BONUS = 2;
 
 export async function listLiveMatchesDb() {
@@ -212,8 +213,13 @@ export async function setMatchStatusDb(matchId: string, payload: SetMatchStatusP
       if (finalAwayScore === 0) cleanSheetTeamIds.push(updated.rows[0].home_team_id);
       if (finalHomeScore === 0) cleanSheetTeamIds.push(updated.rows[0].away_team_id);
       if (cleanSheetTeamIds.length) {
+        // Goalkeepers and defenders only - not attackers, same convention as real
+        // fantasy football.
         const squad = await client.query(
-          `select team_id, player_id from public.match_lineups where match_id = $1 and team_id = any($2::uuid[])`,
+          `select ml.team_id, ml.player_id
+           from public.match_lineups ml
+           join public.players p on p.id = ml.player_id
+           where ml.match_id = $1 and ml.team_id = any($2::uuid[]) and p.position in ('golman', 'odbrana')`,
           [matchId, cleanSheetTeamIds]
         );
         for (const player of squad.rows) {

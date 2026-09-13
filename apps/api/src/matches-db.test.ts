@@ -191,7 +191,7 @@ describe("setMatchStatusDb", () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
-      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper");
+      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper", "golman");
       const striker = await createTestPlayer(tracker, awayTeamId, "__test__ striker");
       const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
       await upsertLineupDb(
@@ -221,12 +221,39 @@ describe("setMatchStatusDb", () => {
     }
   });
 
+  test("an attacker on the clean sheet side does not get the bonus", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper", "golman");
+      const attacker = await createTestPlayer(tracker, homeTeamId, "__test__ attacker", "napad");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await upsertLineupDb(
+        matchId,
+        {
+          players: [
+            { playerId: keeper, teamId: homeTeamId, isStarter: true },
+            { playerId: attacker, teamId: homeTeamId, isStarter: true }
+          ]
+        },
+        testActor
+      );
+
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
+
+      assert.equal(await fetchFantasyPoints(matchId, keeper), 2);
+      assert.equal(await fetchFantasyPoints(matchId, attacker), 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
   test("both sides get the clean sheet bonus on a 0-0", async () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
-      const homePlayer = await createTestPlayer(tracker, homeTeamId, "__test__ home player");
-      const awayPlayer = await createTestPlayer(tracker, awayTeamId, "__test__ away player");
+      const homePlayer = await createTestPlayer(tracker, homeTeamId, "__test__ home player", "golman");
+      const awayPlayer = await createTestPlayer(tracker, awayTeamId, "__test__ away player", "odbrana");
       const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
       await upsertLineupDb(
         matchId,
@@ -271,7 +298,7 @@ describe("setMatchStatusDb", () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
-      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper");
+      const keeper = await createTestPlayer(tracker, homeTeamId, "__test__ keeper", "golman");
       const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
       await upsertLineupDb(matchId, { players: [{ playerId: keeper, teamId: homeTeamId, isStarter: true }] }, testActor);
 
