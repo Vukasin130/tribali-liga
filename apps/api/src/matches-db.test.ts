@@ -187,7 +187,40 @@ describe("setMatchStatusDb", () => {
     return Number(result.rows[0]?.fantasy_points ?? 0);
   }
 
-  test("a player in the lineup gets +2 for a clean sheet, the conceding side doesn't", async () => {
+  test("everyone in the lineup gets the flat +2 appearance bonus, regardless of position or result", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const conceding = await createTestPlayer(tracker, homeTeamId, "__test__ conceding defender", "odbrana");
+      const notInLineup = await createTestPlayer(tracker, homeTeamId, "__test__ not in lineup", "napad");
+      const scorer = await createTestPlayer(tracker, awayTeamId, "__test__ scorer", "napad");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      // notInLineup is deliberately left out entirely.
+      await upsertLineupDb(
+        matchId,
+        {
+          players: [
+            { playerId: conceding, teamId: homeTeamId, isStarter: true },
+            { playerId: scorer, teamId: awayTeamId, isStarter: true }
+          ]
+        },
+        testActor
+      );
+
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 0, awayScore: 1 }, testActor);
+
+      // Home conceded, so no clean sheet either way - both lineup players still get the
+      // plain appearance bonus regardless.
+      assert.equal(await fetchFantasyPoints(matchId, conceding), 2);
+      assert.equal(await fetchFantasyPoints(matchId, scorer), 2);
+      // Never listed in the lineup at all - no appearance bonus.
+      assert.equal(await fetchFantasyPoints(matchId, notInLineup), 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("a clean sheet stacks on top of the appearance bonus, not instead of it", async () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
@@ -208,8 +241,11 @@ describe("setMatchStatusDb", () => {
       // Home wins 1-0 - home kept a clean sheet, away conceded.
       await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
 
-      assert.equal(await fetchFantasyPoints(matchId, keeper), 2);
-      assert.equal(await fetchFantasyPoints(matchId, striker), 0);
+      // Keeper: +2 appearance, +2 clean sheet.
+      assert.equal(await fetchFantasyPoints(matchId, keeper), 4);
+      // Striker played too, so still gets the plain appearance bonus - just not a clean
+      // sheet, since their side conceded.
+      assert.equal(await fetchFantasyPoints(matchId, striker), 2);
 
       const events = await query<{ type: string }>(
         `select type from public.match_events where match_id = $1 and type = 'clean_sheet'`,
@@ -221,7 +257,7 @@ describe("setMatchStatusDb", () => {
     }
   });
 
-  test("an attacker on the clean sheet side does not get the bonus", async () => {
+  test("an attacker on the clean sheet side gets the appearance bonus but not the clean sheet one", async () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
@@ -241,8 +277,8 @@ describe("setMatchStatusDb", () => {
 
       await setMatchStatusDb(matchId, { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
 
-      assert.equal(await fetchFantasyPoints(matchId, keeper), 2);
-      assert.equal(await fetchFantasyPoints(matchId, attacker), 0);
+      assert.equal(await fetchFantasyPoints(matchId, keeper), 4);
+      assert.equal(await fetchFantasyPoints(matchId, attacker), 2);
     } finally {
       await cleanupTestData(tracker);
     }
@@ -268,14 +304,14 @@ describe("setMatchStatusDb", () => {
 
       await setMatchStatusDb(matchId, { status: "finished", homeScore: 0, awayScore: 0 }, testActor);
 
-      assert.equal(await fetchFantasyPoints(matchId, homePlayer), 2);
-      assert.equal(await fetchFantasyPoints(matchId, awayPlayer), 2);
+      assert.equal(await fetchFantasyPoints(matchId, homePlayer), 4);
+      assert.equal(await fetchFantasyPoints(matchId, awayPlayer), 4);
     } finally {
       await cleanupTestData(tracker);
     }
   });
 
-  test("no clean sheet bonus for anyone when the match has no lineup at all", async () => {
+  test("no appearance or clean sheet bonus for anyone when the match has no lineup at all", async () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
@@ -285,7 +321,7 @@ describe("setMatchStatusDb", () => {
       await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
 
       const events = await query<{ type: string }>(
-        `select type from public.match_events where match_id = $1 and type = 'clean_sheet'`,
+        `select type from public.match_events where match_id = $1 and type in ('clean_sheet', 'appearance')`,
         [matchId]
       );
       assert.equal(events.rowCount, 0);
@@ -294,7 +330,7 @@ describe("setMatchStatusDb", () => {
     }
   });
 
-  test("finishing an already-finished match does not award the clean sheet bonus twice", async () => {
+  test("finishing an already-finished match does not award either bonus twice", async () => {
     const tracker = newFixtureTracker();
     try {
       const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
@@ -305,7 +341,7 @@ describe("setMatchStatusDb", () => {
       await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
       await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
 
-      assert.equal(await fetchFantasyPoints(matchId, keeper), 2);
+      assert.equal(await fetchFantasyPoints(matchId, keeper), 4);
     } finally {
       await cleanupTestData(tracker);
     }

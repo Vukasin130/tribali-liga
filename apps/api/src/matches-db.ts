@@ -25,7 +25,8 @@ const VALID_EVENT_TYPES = new Set([
   "substitution",
   "halftime",
   "fulltime",
-  "clean_sheet"
+  "clean_sheet",
+  "appearance"
 ]);
 
 const STAT_RULES: Record<string, { field: string; amount: number; fantasy: number }> = {
@@ -49,6 +50,13 @@ const STAT_RULES: Record<string, { field: string; amount: number; fantasy: numbe
 // score" shortcut has no lineup rows for either team, so there's no one on record to
 // credit.
 const CLEAN_SHEET_BONUS = 2;
+// Flat, unconditional +2 for every player in a match's lineup, any position - awarded the
+// same moment and the same way as the clean sheet bonus above (a real event row +
+// player_match_stats bump), on top of it, not instead of it: a goalkeeper on a clean
+// sheet gets both (+2 appearance, +2 clean sheet = +4), an attacker on the same team just
+// gets the appearance one. Same "no lineup, no credit" rule as clean sheet - a match
+// finished through the quick "enter final score" shortcut has nobody to award this to.
+const APPEARANCE_BONUS = 2;
 
 export async function listLiveMatchesDb() {
   const result = await query(matchBaseSql("where m.status = 'live' order by m.scheduled_at"));
@@ -209,6 +217,16 @@ export async function setMatchStatusDb(matchId: string, payload: SetMatchStatusP
         [matchId, eventMinute, finalHomeScore, finalAwayScore]
       );
 
+      // Flat +2 appearance for every player actually in the lineup, any position, on top
+      // of whatever else they earn (clean sheet included) - not instead of it.
+      const wholeSquad = await client.query(
+        `select team_id, player_id from public.match_lineups where match_id = $1`,
+        [matchId]
+      );
+      for (const player of wholeSquad.rows) {
+        await awardFlatBonus(client, matchId, player.team_id, player.player_id, "appearance", APPEARANCE_BONUS, eventMinute, finalHomeScore, finalAwayScore);
+      }
+
       const cleanSheetTeamIds: string[] = [];
       if (finalAwayScore === 0) cleanSheetTeamIds.push(updated.rows[0].home_team_id);
       if (finalHomeScore === 0) cleanSheetTeamIds.push(updated.rows[0].away_team_id);
@@ -223,20 +241,7 @@ export async function setMatchStatusDb(matchId: string, payload: SetMatchStatusP
           [matchId, cleanSheetTeamIds]
         );
         for (const player of squad.rows) {
-          await client.query(
-            `insert into public.match_events
-               (match_id, minute, type, team_id, player_id, score_home, score_away, fantasy_points_delta)
-             values ($1, $2, 'clean_sheet', $3, $4, $5, $6, $7)`,
-            [matchId, eventMinute, player.team_id, player.player_id, finalHomeScore, finalAwayScore, CLEAN_SHEET_BONUS]
-          );
-          await client.query(
-            `insert into public.player_match_stats (match_id, team_id, player_id, fantasy_points)
-             values ($1, $2, $3, $4)
-             on conflict (match_id, player_id) do update set
-               fantasy_points = public.player_match_stats.fantasy_points + excluded.fantasy_points,
-               updated_at = now()`,
-            [matchId, player.team_id, player.player_id, CLEAN_SHEET_BONUS]
-          );
+          await awardFlatBonus(client, matchId, player.team_id, player.player_id, "clean_sheet", CLEAN_SHEET_BONUS, eventMinute, finalHomeScore, finalAwayScore);
         }
       }
     }
@@ -604,6 +609,36 @@ async function incrementPlayerStat(client: PoolClient, matchId: string, teamId: 
        fantasy_points = public.player_match_stats.fantasy_points + excluded.fantasy_points,
        updated_at = now()`,
     [matchId, teamId, playerId, amount, fantasyDelta]
+  );
+}
+
+// Automatic, whole-match bonuses (appearance, clean sheet) that aren't tied to any
+// player_match_stats counter column, unlike incrementPlayerStat's per-event stats -
+// just a real, auditable match_events row plus the matching fantasy_points bump.
+async function awardFlatBonus(
+  client: PoolClient,
+  matchId: string,
+  teamId: string,
+  playerId: string,
+  type: string,
+  points: number,
+  minute: number,
+  scoreHome: number,
+  scoreAway: number
+) {
+  await client.query(
+    `insert into public.match_events
+       (match_id, minute, type, team_id, player_id, score_home, score_away, fantasy_points_delta)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [matchId, minute, type, teamId, playerId, scoreHome, scoreAway, points]
+  );
+  await client.query(
+    `insert into public.player_match_stats (match_id, team_id, player_id, fantasy_points)
+     values ($1, $2, $3, $4)
+     on conflict (match_id, player_id) do update set
+       fantasy_points = public.player_match_stats.fantasy_points + excluded.fantasy_points,
+       updated_at = now()`,
+    [matchId, teamId, playerId, points]
   );
 }
 

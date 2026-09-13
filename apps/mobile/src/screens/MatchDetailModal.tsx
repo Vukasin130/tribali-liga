@@ -760,7 +760,8 @@ const EVENT_LABELS: Record<string, string> = {
   halftime: "Kraj prvog poluvremena",
   second_half: "Pocetak drugog poluvremena",
   fulltime: "Kraj utakmice",
-  clean_sheet: "Cista mreza"
+  clean_sheet: "Cista mreza",
+  appearance: "Nastup"
 };
 
 const EVENT_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -775,7 +776,8 @@ const EVENT_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   halftime: "pause-circle-outline",
   second_half: "play-circle-outline",
   fulltime: "flag-outline",
-  clean_sheet: "shield-checkmark-outline"
+  clean_sheet: "shield-checkmark-outline",
+  appearance: "checkmark-circle-outline"
 };
 
 type TimelineContent = {
