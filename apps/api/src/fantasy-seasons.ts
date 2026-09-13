@@ -472,6 +472,15 @@ export async function listFantasyGameweeks(seasonId: string) {
 
 
 const FANTASY_TZ = "Europe/Belgrade";
+// How long after a round's own last real kickoff to consider it actually over. A round's
+// matches are always done well before the calendar week itself ends (e.g. every league's
+// last match falls on Thursday, never Friday-Sunday) - waiting for the fixed Monday-Sunday
+// week boundary meant scoring, locking, and price movement all sat idle for days after
+// the games themselves were already finished. This just needs to comfortably outlast a
+// single match (including a delayed kickoff) plus the time an admin needs to enter its
+// final score - it does not need to be tight, since scoring itself still refuses to run
+// early on its own (see scoreFantasySeasonGameweek's readiness check).
+const ROUND_END_BUFFER_HOURS = 6;
 
 // Converts a Belgrade-local (Europe/Belgrade) wall-clock date/time into the UTC instant
 // it represents - needed because "Monday 00:00" means the local Monday regardless of
@@ -568,12 +577,12 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
   );
   if (!matches.rows.length) return;
 
-  const weeks = new Map<number, { weekStart: Date; weekEnd: Date; times: number[] }>();
+  const weeks = new Map<number, { weekStart: Date; times: number[] }>();
   for (const row of matches.rows) {
     const scheduledAt = new Date(row.scheduled_at);
-    const { weekStart, weekEnd } = belgradeWeekBounds(scheduledAt);
+    const { weekStart } = belgradeWeekBounds(scheduledAt);
     const key = weekStart.getTime();
-    if (!weeks.has(key)) weeks.set(key, { weekStart, weekEnd, times: [] });
+    if (!weeks.has(key)) weeks.set(key, { weekStart, times: [] });
     weeks.get(key)!.times.push(scheduledAt.getTime());
   }
   const orderedWeeks = [...weeks.values()].sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
@@ -592,6 +601,9 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
   let index = 0;
   for (const week of orderedWeeks) {
     index += 1;
+    // ends_at anchors to the round's own last real kickoff (+ a buffer), not the fixed
+    // calendar week boundary - see ROUND_END_BUFFER_HOURS.
+    const roundEndsAt = new Date(Math.max(...week.times) + ROUND_END_BUFFER_HOURS * 60 * 60 * 1000);
     const result = await query(
       `insert into public.fantasy_gameweeks (fantasy_season_id, name, starts_at, locks_at, ends_at, status)
        values ($1, $2, $3, $4, $5, 'open')
@@ -602,7 +614,7 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
          updated_at = now()
        where public.fantasy_gameweeks.status = 'open'
        returning id, (xmax = 0) as inserted`,
-      [seasonId, `Kolo ${index}`, week.weekStart.toISOString(), new Date(Math.min(...week.times)).toISOString(), week.weekEnd.toISOString()]
+      [seasonId, `Kolo ${index}`, week.weekStart.toISOString(), new Date(Math.min(...week.times)).toISOString(), roundEndsAt.toISOString()]
     );
     if (result.rows[0]?.inserted) {
       freshlyOpened.push({ index, gameweekId: result.rows[0].id });

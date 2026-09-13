@@ -78,6 +78,30 @@ describe("runFantasyGameweekSweep", () => {
     }
   });
 
+  // Regression test for a real request: a round's matches are always done well before
+  // the calendar week itself ends (e.g. every league's last match is on a Thursday,
+  // never Friday-Sunday) - ends_at used to sit at the following Monday regardless, so
+  // scoring/locking/price movement all waited days after the games were already over.
+  test("a round's window ends shortly after its own last kickoff, not the calendar week", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const lastKickoff = daysFromNow(14);
+      await createTestMatch(tracker, competitionId, home, away, lastKickoff);
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+
+      await runFantasyGameweekSweep();
+
+      const gameweeks = await fetchGameweeksForSeason(seasonId);
+      const endsAtMs = new Date(gameweeks[0].ends_at).getTime();
+      assert.equal(endsAtMs, lastKickoff.getTime() + 6 * 60 * 60 * 1000);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
   test("a round whose first match already kicked off this week is locked", async () => {
     const tracker = newFixtureTracker();
     try {
