@@ -9,6 +9,7 @@ import {
   setFantasySeasonPicks,
   syncFantasySeasonPool
 } from "./fantasy-seasons.ts";
+import { upsertLineupDb } from "./matches-db.ts";
 import { query } from "./db.ts";
 import {
   cleanupTestData,
@@ -457,6 +458,50 @@ describe("scoreFantasySeasonGameweek", () => {
         [seasonId, byePlayer]
       );
       assert.equal(Number(pool.rows[0]?.current_price), startingPrice);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  // A real distinction the admin draws live: when a match actually gets a lineup built
+  // (RosterPhase), a player left out of it entirely (not present that day) takes a flat,
+  // harsher penalty than someone who played and simply had a quiet match.
+  test("a player left out of an actually-built lineup takes the flat exclusion penalty, not the normal step", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const inLineup = await createTestPlayer(tracker, home, "__test__ played");
+      const leftOut = await createTestPlayer(tracker, home, "__test__ left out");
+      const matchId = await createTestMatch(tracker, competitionId, home, away, daysFromNow(-1), { status: "finished" });
+      // A real lineup was built for this match - inLineup is in it, leftOut deliberately
+      // isn't (absent that day), same as an admin excluding a player in RosterPhase.
+      await upsertLineupDb(matchId, { players: [{ playerId: inLineup, teamId: home, isStarter: true }] }, testActor);
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      const startingPrice = 8;
+      await setFantasyPoolPlayerPrice(seasonId, inLineup, { price: startingPrice, isPriceLocked: false }, testActor);
+      await setFantasyPoolPlayerPrice(seasonId, leftOut, { price: startingPrice, isPriceLocked: false }, testActor);
+
+      const gameweekId = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-2),
+        locksAt: daysFromNow(-1),
+        endsAt: hoursFromNow(-1)
+      });
+
+      await scoreFantasySeasonGameweek(gameweekId, testActor);
+
+      const pool = await query<{ player_id: string; current_price: string }>(
+        `select player_id, current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = any($2::uuid[])`,
+        [seasonId, [inLineup, leftOut]]
+      );
+      const byId = new Map(pool.rows.map((row) => [row.player_id, Number(row.current_price)]));
+      // In the lineup but no recorded stats (0 points) - the normal, smaller step.
+      assert.equal(byId.get(inLineup), startingPrice - 0.1);
+      // Left out of an actually-built lineup entirely - the flat, harsher penalty.
+      assert.equal(byId.get(leftOut), startingPrice - 1);
     } finally {
       await cleanupTestData(tracker);
     }

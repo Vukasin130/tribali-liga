@@ -14,6 +14,13 @@ const MIN_PRICE = 4;
 // in-form player can climb past this all season.
 const MAX_MANUAL_PRICE = 15;
 const PRICE_STEP = 0.1;
+// Flat penalty for a player whose team played this round but who the admin left out of
+// that specific match's lineup entirely (not present that day) - distinct from, and much
+// harsher than, the normal PRICE_STEP nudge a player who actually turned out gets even
+// on a bad round. Only applies to a match the admin actually built a lineup for; a match
+// finished through the quick "enter final score" shortcut (no lineup at all) can't tell
+// who was left out, so it falls back to the normal points-based step for everyone in it.
+const LINEUP_EXCLUSION_PENALTY = 1;
 // Starting XI is position-locked: 1 GK + 2 DEF + 2 ATT. The 5-player bench (B1-B5) has no
 // position restriction - any player can fill any bench slot. B1 (the 6th player overall)
 // scores at full weight; B2-B5 score at half weight.
@@ -900,6 +907,15 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
     // completely untouched, silently exempting most of the pool most rounds - the rule is
     // every player, every round, no exceptions, so a played-but-untracked match now
     // counts as 0 points for its players (coalesced below) rather than skipping them.
+    //
+    // Three distinct outcomes per player this round:
+    //  - their team had no match at all (a bye) -> untouched (never enters `movable`
+    //    at all, since the `and played` filter below excludes them from `updated`);
+    //  - their team's match got a real lineup built (RosterPhase in the live admin) and
+    //    they were left out of it entirely (not present that day) -> flat
+    //    LINEUP_EXCLUSION_PENALTY, harsher than the normal step;
+    //  - anyone else who played (in the lineup, or the match had no lineup tracking at
+    //    all) -> the normal points-vs-price PRICE_STEP nudge, 0 points if untracked.
     const priceUpdates = roundEnded
       ? await client.query(
       `with season_competitions as (
@@ -913,9 +929,15 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
            and status = 'finished'
        ),
        played_teams as (
-         select home_team_id as team_id from round_matches
-         union
-         select away_team_id as team_id from round_matches
+         select home_team_id as team_id, id as match_id from round_matches
+         union all
+         select away_team_id as team_id, id as match_id from round_matches
+       ),
+       -- A match the admin actually built a lineup for (RosterPhase) - as opposed to one
+       -- finished through the quick "enter final score" shortcut, which has no lineup
+       -- rows for either team and so can't tell who was left out.
+       lineup_matches as (
+         select distinct match_id from public.match_lineups where match_id in (select id from round_matches)
        ),
        round_stats as (
          select player_id, sum(fantasy_points) as points
@@ -923,39 +945,53 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
          where match_id in (select id from round_matches)
          group by player_id
        ),
-       gw_points as (
-         select fpp.player_id, coalesce(rs.points, 0) as points
+       player_matches as (
+         select
+           fpp.id as pool_id,
+           pt.match_id,
+           (pt.match_id in (select match_id from lineup_matches)) as lineup_was_set,
+           exists (
+             select 1 from public.match_lineups ml where ml.match_id = pt.match_id and ml.player_id = fpp.player_id
+           ) as in_lineup
          from public.fantasy_player_pool fpp
          join played_teams pt on pt.team_id = fpp.team_id
-         left join round_stats rs on rs.player_id = fpp.player_id
          where fpp.fantasy_season_id = $1
        ),
        movable as (
-         select fpp.id, fpp.player_id, fpp.current_price as old_price
+         select
+           fpp.id,
+           fpp.player_id,
+           fpp.current_price as old_price,
+           bool_or(pm.match_id is not null) as played,
+           bool_or(pm.lineup_was_set and not pm.in_lineup) as excluded_from_lineup,
+           coalesce(rs.points, 0) as points
          from public.fantasy_player_pool fpp
-         join gw_points gwp on gwp.player_id = fpp.player_id
+         left join player_matches pm on pm.pool_id = fpp.id
+         left join round_stats rs on rs.player_id = fpp.player_id
          where fpp.fantasy_season_id = $1 and fpp.is_price_locked = false
+         group by fpp.id, fpp.player_id, fpp.current_price, rs.points
        ),
        updated as (
          update public.fantasy_player_pool fpp
          set current_price = case
+               when m.excluded_from_lineup then greatest($4::numeric, round(fpp.current_price - $6::numeric, 2))
                -- Uncapped above MIN_PRICE - a player in real form can climb past
                -- MAX_MANUAL_PRICE all season, that ceiling only bounds an admin's own
                -- hand-set starting price (see setFantasyPoolPlayerPrice).
-               when gwp.points > fpp.current_price then round(fpp.current_price + $5::numeric, 2)
-               when gwp.points < fpp.current_price then greatest($4::numeric, round(fpp.current_price - $5::numeric, 2))
+               when m.points > fpp.current_price then round(fpp.current_price + $5::numeric, 2)
+               when m.points < fpp.current_price then greatest($4::numeric, round(fpp.current_price - $5::numeric, 2))
                else fpp.current_price
              end,
              updated_at = now()
-         from gw_points gwp
-         where fpp.fantasy_season_id = $1 and fpp.player_id = gwp.player_id and fpp.is_price_locked = false
+         from movable m
+         where fpp.id = m.id and m.played
          returning fpp.id, fpp.player_id, fpp.current_price as new_price
        )
        select u.player_id, (u.new_price - m.old_price) as delta
        from updated u
        join movable m on m.id = u.id
        where u.new_price <> m.old_price`,
-          [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP]
+          [seasonId, gameweek.starts_at, windowEnd, MIN_PRICE, PRICE_STEP, LINEUP_EXCLUSION_PENALTY]
         )
       : { rows: [] as { player_id: string; delta: number }[] };
 
