@@ -117,6 +117,7 @@ import {
   cloneCompetitionTeams,
   configureCompetition,
   generateCompetitionSchedule,
+  addReturnLeg,
   resumeCompetitionSchedule,
   getCompetitionSetup,
   prepareKnockoutPhase,
@@ -489,6 +490,16 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 201, {
         ok: true,
         data: await resumeCompetitionSchedule(adminCompetitionResumeScheduleMatch[1], await readJson(req), sessionUser)
+      });
+      return;
+    }
+
+    const adminCompetitionAddReturnLegMatch = url.pathname.match(/^\/admin\/competitions\/([^/]+)\/add-return-leg$/);
+    if (adminCompetitionAddReturnLegMatch && req.method === "POST") {
+      requireAdmin(sessionUser);
+      sendJson(res, 201, {
+        ok: true,
+        data: await addReturnLeg(adminCompetitionAddReturnLegMatch[1], await readJson(req), sessionUser)
       });
       return;
     }

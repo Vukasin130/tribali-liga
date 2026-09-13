@@ -673,6 +673,88 @@ export async function resumeCompetitionSchedule(competitionId: string, payload: 
   return result.map(normalizeMatch);
 }
 
+interface AddReturnLegPayload {
+  phaseCode?: string;
+}
+
+// Turns a single round-robin (rounds 1..N) into a double one by mirroring every existing
+// match as a new one at round + N, home and away swapped, N weeks after its original date
+// - i.e. leg 2 plays out exactly like leg 1, just reversed. Only ever adds matches: leg 1
+// is never touched, so this is safe to run even after some of its rounds have already
+// been played. Refuses if the phase doesn't currently look like a clean, un-mirrored
+// single leg (round numbers exactly 1..N, no gaps or existing leg 2) - the ask is
+// specifically "add a return leg once", not "double it again every time this is called".
+export async function addReturnLeg(competitionId: string, payload: AddReturnLegPayload, actor: Actor) {
+  const phaseCode = String(payload.phaseCode || "regular").trim();
+
+  const result = await transaction(async (client) => {
+    const phase = await getPhaseByCode(client, competitionId, phaseCode);
+    const existing = await client.query(
+      `select * from public.matches
+       where competition_id = $1 and coalesce(phase_id::text, '') = coalesce($2::text, '')
+       order by round, scheduled_at`,
+      [competitionId, phase.id]
+    );
+    if (!existing.rows.length) {
+      throw httpError(400, "Ova faza jos nema nijedan mec - prvo generisi raspored.");
+    }
+
+    const rounds = existing.rows.map((row) => Number(row.round) || 0);
+    const lastRound = Math.max(...rounds);
+    if (lastRound <= 0 || Math.min(...rounds) !== 1) {
+      throw httpError(400, "Mecevi u ovoj fazi nemaju validne, uzastopne brojeve kola.");
+    }
+    // A pair that already appears more than once means a return leg (or some other
+    // duplication) already exists - refuse rather than adding a third meeting on top of
+    // it. A clean, not-yet-mirrored single leg never repeats a pair.
+    const pairCounts = new Map<string, number>();
+    for (const row of existing.rows) {
+      const key = pairKey(row.home_team_id, row.away_team_id);
+      pairCounts.set(key, (pairCounts.get(key) || 0) + 1);
+    }
+    if ([...pairCounts.values()].some((count) => count > 1)) {
+      throw httpError(
+        400,
+        "Ova faza vec izgleda kao da ima povratne mecceve - povratna runda se moze dodati samo jednom, preko ciste prve runde."
+      );
+    }
+
+    const inserted = [];
+    for (const row of existing.rows) {
+      const mirroredRound = Number(row.round) + lastRound;
+      const mirroredDate = new Date(new Date(row.scheduled_at).getTime() + lastRound * 7 * 24 * 60 * 60 * 1000);
+      const saved = await client.query(
+        `insert into public.matches
+           (competition_id, phase_id, home_team_id, away_team_id, phase, group_name, round, scheduled_at, venue, status)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'scheduled')
+         returning *`,
+        [
+          competitionId,
+          phase.id,
+          row.away_team_id,
+          row.home_team_id,
+          row.phase,
+          row.group_name,
+          mirroredRound,
+          mirroredDate.toISOString(),
+          row.venue
+        ]
+      );
+      inserted.push(saved.rows[0]);
+    }
+
+    await auditWithClient(client, actor, "competition.schedule.add-return-leg", "competition", competitionId, {
+      phaseCode,
+      firstLegRounds: lastRound,
+      added: inserted.length
+    });
+
+    return inserted;
+  });
+
+  return result.map(normalizeMatch);
+}
+
 function pairKey(aId: string, bId: string): string {
   return [aId, bId].sort().join("|");
 }

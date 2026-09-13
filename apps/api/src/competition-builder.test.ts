@@ -1,6 +1,6 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { configureCompetition, generateCompetitionSchedule, resumeCompetitionSchedule } from "./competition-builder.ts";
+import { addReturnLeg, configureCompetition, generateCompetitionSchedule, resumeCompetitionSchedule } from "./competition-builder.ts";
 import { query } from "./db.ts";
 import { cleanupTestData, closePool, createTestCompetition, createTestTeam, newFixtureTracker } from "./test-helpers.ts";
 import type { Actor } from "./types.ts";
@@ -154,6 +154,96 @@ describe("resumeCompetitionSchedule", () => {
         }
       }
       assert.equal(allPairs.size, expectedPairs);
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+describe("addReturnLeg", () => {
+  // Mirrors the real Zrenjanin request: an 8-team single round robin (7 rounds), no
+  // matches played yet, turn it into a home-and-away double round robin with no knockout
+  // involved at all.
+  test("mirrors every round with home/away swapped, continuing the round numbers", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      for (let i = 1; i <= 8; i += 1) {
+        await createTestTeam(tracker, competitionId, `__test__ team ${String(i).padStart(2, "0")}`);
+      }
+      await configureCompetition(
+        competitionId,
+        {
+          formatType: "league",
+          phases: [{ code: "regular", name: "Regularni deo", type: "league", sequence: 1, legs: 1 }]
+        },
+        testActor
+      );
+
+      const startAt = new Date(2026, 8, 1, 18, 0, 0).toISOString();
+      const firstLeg = await generateCompetitionSchedule(
+        competitionId,
+        { phaseCode: "regular", legs: 1, startAt, intervalMinutes: 60 },
+        testActor
+      );
+      assert.equal(firstLeg.length, 28); // C(8,2) for a single round robin, 7 rounds x 4 matches
+
+      const returnLeg = await addReturnLeg(competitionId, { phaseCode: "regular" }, testActor);
+      assert.equal(returnLeg.length, 28);
+      assert.ok(returnLeg.every((match) => match.round >= 8 && match.round <= 14));
+
+      // Every mirrored match is the exact reverse of its leg-1 counterpart, 7 weeks later.
+      const firstByPair = new Map(firstLeg.map((match) => [[match.homeTeamId, match.awayTeamId].join(">"), match]));
+      for (const match of returnLeg) {
+        const original = firstByPair.get([match.awayTeamId, match.homeTeamId].join(">"));
+        assert.ok(original, `no leg-1 match found for the reverse of round ${match.round}`);
+        assert.equal(match.round, original!.round + 7);
+        const expectedDate = new Date(original!.scheduledAt).getTime() + 7 * 7 * 24 * 60 * 60 * 1000;
+        assert.equal(new Date(match.scheduledAt).getTime(), expectedDate);
+      }
+
+      // Leg 1 itself is completely untouched.
+      const allMatches = await query<{ round: number; status: string }>(
+        "select round, status from public.matches where competition_id = $1",
+        [competitionId]
+      );
+      assert.equal(allMatches.rowCount, 56);
+      assert.ok(allMatches.rows.every((row) => row.status === "scheduled"));
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("refuses to add a return leg twice", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      for (let i = 1; i <= 4; i += 1) {
+        await createTestTeam(tracker, competitionId, `__test__ team ${String(i).padStart(2, "0")}`);
+      }
+      await configureCompetition(
+        competitionId,
+        {
+          formatType: "league",
+          phases: [{ code: "regular", name: "Regularni deo", type: "league", sequence: 1, legs: 1 }]
+        },
+        testActor
+      );
+      const startAt = new Date(2026, 8, 1, 18, 0, 0).toISOString();
+      await generateCompetitionSchedule(competitionId, { phaseCode: "regular", legs: 1, startAt, intervalMinutes: 60 }, testActor);
+      await addReturnLeg(competitionId, { phaseCode: "regular" }, testActor);
+
+      await assert.rejects(
+        () => addReturnLeg(competitionId, { phaseCode: "regular" }, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
     } finally {
       await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
       await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
