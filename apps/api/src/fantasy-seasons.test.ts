@@ -201,6 +201,45 @@ describe("runFantasyGameweekSweep", () => {
       await cleanupTestData(tracker);
     }
   });
+
+  // Regression test for a real incident: an admin schedule change that touches many
+  // future weeks at once (adding a return leg, weaving a mid-season team into a dozen
+  // future rounds) used to fire one real push per newly-created week, all at once - a
+  // burst of "new round" notifications about rounds months away nobody needed right now.
+  test("does not notify when several new rounds are discovered in the same sweep", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      // Three matches seven days apart land in three distinct weeks - exactly the shape a
+      // bulk schedule operation produces, as opposed to one new week appearing at a time.
+      await createTestMatch(tracker, competitionId, home, away, daysFromNow(7));
+      await createTestMatch(tracker, competitionId, home, away, daysFromNow(14));
+      await createTestMatch(tracker, competitionId, home, away, daysFromNow(21));
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+
+      const before = await query<{ count: string }>(
+        "select count(*)::int as count from public.audit_logs where action = 'notifications.automatic'"
+      );
+
+      await runFantasyGameweekSweep();
+
+      const gameweeks = await fetchGameweeksForSeason(seasonId);
+      assert.equal(gameweeks.length, 3, "all three weeks should still become real rounds");
+
+      const after = await query<{ count: string }>(
+        "select count(*)::int as count from public.audit_logs where action = 'notifications.automatic'"
+      );
+      assert.equal(
+        Number(after.rows[0]?.count),
+        Number(before.rows[0]?.count),
+        "no notification should fire when several rounds open in the same sweep"
+      );
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
 });
 
 describe("scoreFantasySeasonGameweek", () => {

@@ -578,6 +578,17 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
   }
   const orderedWeeks = [...weeks.values()].sort((a, b) => a.weekStart.getTime() - b.weekStart.getTime());
 
+  // Collected rather than sent immediately below - a real incident: an admin schedule
+  // change that touches many future weeks at once (adding a return leg, weaving a
+  // mid-season team into a dozen future rounds, etc.) used to fire one real push per
+  // newly-created week, all at once, to every user - a burst of "new round" pushes about
+  // rounds months away that nobody needed telling about right now. A single freshly
+  // created week - the normal, steady case as real fixtures get added incrementally -
+  // still notifies exactly like before; only a batch of several in the same pass is
+  // suppressed, since that shape is specific to a bulk schedule operation, not organic
+  // week-by-week progression.
+  const freshlyOpened: { index: number; gameweekId: string }[] = [];
+
   let index = 0;
   for (const week of orderedWeeks) {
     index += 1;
@@ -593,15 +604,18 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
        returning id, (xmax = 0) as inserted`,
       [seasonId, `Kolo ${index}`, week.weekStart.toISOString(), new Date(Math.min(...week.times)).toISOString(), week.weekEnd.toISOString()]
     );
-    // A fresh round is the one moment worth notifying fans about - matches the old
-    // manual "opening a round" notification, just fired automatically instead.
     if (result.rows[0]?.inserted) {
-      sendAutomaticNotification(
-        "Novo fantazi kolo je otvoreno!",
-        `Kolo ${index} je otvoreno - sastavi ili izmeni svoj tim na vreme.`,
-        { kind: "gameweek_open", gameweekId: result.rows[0].id }
-      );
+      freshlyOpened.push({ index, gameweekId: result.rows[0].id });
     }
+  }
+
+  if (freshlyOpened.length === 1) {
+    const [{ index: roundIndex, gameweekId }] = freshlyOpened;
+    sendAutomaticNotification(
+      "Novo fantazi kolo je otvoreno!",
+      `Kolo ${roundIndex} je otvoreno - sastavi ili izmeni svoj tim na vreme.`,
+      { kind: "gameweek_open", gameweekId }
+    );
   }
 
   // Excludes only a round that's genuinely settled (finished AND its own window has
