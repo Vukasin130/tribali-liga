@@ -228,6 +228,14 @@ export function reopenMatch(matchId: string) {
   return apiPost<MatchDetail>(`/admin/matches/${matchId}/reopen`, {});
 }
 
+// Undoes the single most recent player action (a wrong tap during live scoring - goal,
+// card, shot, save, etc.) - reverses the score/stats/points it caused and deletes the
+// event. Clock transitions (kickoff/halftime/etc.) and the automatic clean sheet/
+// appearance bonuses are never touched by this - only real player-action mistakes.
+export function undoLastMatchEvent(matchId: string) {
+  return apiPost<MatchDetail>(`/admin/matches/${matchId}/undo-last-event`, {});
+}
+
 export function setMatchMedia(matchId: string, payload: { kind?: string; label?: string; url: string }) {
   return apiPatch<MediaLink>(`/admin/matches/${matchId}/media`, payload);
 }

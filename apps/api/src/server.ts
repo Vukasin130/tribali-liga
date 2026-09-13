@@ -43,6 +43,7 @@ import {
   listLiveMatches,
   setMatchMedia,
   reopenMatch,
+  undoLastMatchEvent,
   setMatchPeriod,
   setMatchStatus,
   submitMatchPrediction,
@@ -1015,6 +1016,13 @@ const server = http.createServer(async (req, res) => {
     if (adminMatchReopenMatch && req.method === "POST") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await reopenMatch(adminMatchReopenMatch[1], sessionUser) });
+      return;
+    }
+
+    const adminMatchUndoEventMatch = url.pathname.match(/^\/admin\/matches\/([^/]+)\/undo-last-event$/);
+    if (adminMatchUndoEventMatch && req.method === "POST") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await undoLastMatchEvent(adminMatchUndoEventMatch[1], sessionUser) });
       return;
     }
 

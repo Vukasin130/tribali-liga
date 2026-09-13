@@ -530,6 +530,85 @@ export async function addMatchEventDb(matchId: string, payload: MatchEventPayloa
   };
 }
 
+// Only ever undoes a genuine player-action mistake (a wrong tap during live scoring) -
+// deliberately excludes the clock/system events (kickoff, halftime, second_half,
+// fulltime) and the automatic bonuses (clean_sheet, appearance), which have their own
+// dedicated ways to fix a mistake (setMatchPeriodDb, reopenMatchDb) and shouldn't be
+// silently deleted by a generic "undo" button.
+const UNDOABLE_EVENT_TYPES = [
+  "goal",
+  "shot_on_target",
+  "shot_off_target",
+  "goalkeeper_save",
+  "corner",
+  "foul",
+  "penalty",
+  "two_minutes",
+  "yellow_card",
+  "red_card"
+];
+
+// Reverses whichever undoable event was logged most recently for this match - the exact
+// inverse of addMatchEventDb: rolls back the score if it was a goal (and the assist it
+// carried, if any), reverses the primary player's stat counter and fantasy points by the
+// same amounts that were actually applied (reading fantasy_points_delta back off the
+// event itself, not re-deriving it, in case it was ever a custom override rather than the
+// STAT_RULES default), then deletes the event. Real incident: an admin's finger slipped
+// mid-match (wrong player, wrong action) with no way back except editing the database.
+export async function undoLastMatchEventDb(matchId: string, actor: Actor) {
+  const undone = await transaction(async (client) => {
+    const match = await ensureMatch(client, matchId);
+    if (match.status === "finished") {
+      throw httpError(400, "Mec je vec zavrsen - koristi 'Vrati u toku' da ispravis rezultat.");
+    }
+
+    const lastEvent = await client.query(
+      `select * from public.match_events
+       where match_id = $1 and type::text = any($2::text[])
+       order by created_at desc
+       limit 1`,
+      [matchId, UNDOABLE_EVENT_TYPES]
+    );
+    const event = lastEvent.rows[0];
+    if (!event) throw httpError(400, "Nema akcije za ovaj mec koja moze da se ponisti.");
+
+    if (event.type === "goal") {
+      let homeScore = Number(match.home_score || 0);
+      let awayScore = Number(match.away_score || 0);
+      if (event.team_id === match.home_team_id) homeScore = Math.max(0, homeScore - 1);
+      if (event.team_id === match.away_team_id) awayScore = Math.max(0, awayScore - 1);
+      await client.query("update public.matches set home_score = $2, away_score = $3, updated_at = now() where id = $1", [
+        matchId,
+        homeScore,
+        awayScore
+      ]);
+      if (event.related_player_id && event.team_id) {
+        await incrementPlayerStat(client, matchId, event.team_id, event.related_player_id, "assists", -1, -3);
+      }
+    }
+
+    const rule = STAT_RULES[event.type];
+    if (rule && event.player_id && event.team_id) {
+      await incrementPlayerStat(
+        client,
+        matchId,
+        event.team_id,
+        event.player_id,
+        rule.field,
+        -rule.amount,
+        -Number(event.fantasy_points_delta || 0)
+      );
+    }
+
+    await client.query("delete from public.match_events where id = $1", [event.id]);
+    await recalculateCompetitionStandings(client, match.competition_id);
+    return event;
+  });
+
+  await audit(actor, "match.event.undo", "matchEvent", undone.id, { matchId, type: undone.type });
+  return getMatchDetailDb(matchId);
+}
+
 // One media link per (match, kind) - re-saving (e.g. correcting a stream URL) replaces
 // the previous row for that kind rather than piling up duplicates. There's no `id` to
 // conflict on for a fresh insert, so the upsert has to be keyed on (match_id, kind)

@@ -15,6 +15,7 @@ import {
   listLiveMatches,
   reopenMatch,
   setMatchLineup,
+  undoLastMatchEvent,
   setMatchPeriod,
   setMatchStatus,
   updateMatch
@@ -57,6 +58,22 @@ const EVENT_LABELS: Record<string, string> = {
   clean_sheet: "cista mreza (+2)",
   appearance: "nastup (+2)"
 };
+
+// Mirrors the backend's UNDOABLE_EVENT_TYPES (undoLastMatchEventDb) - just for disabling
+// the undo button client-side when there's clearly nothing real to undo yet (a match with
+// only a kickoff event, say). The server is the real source of truth either way.
+const UNDOABLE_EVENT_TYPES = new Set([
+  "goal",
+  "shot_on_target",
+  "shot_off_target",
+  "goalkeeper_save",
+  "corner",
+  "foul",
+  "penalty",
+  "two_minutes",
+  "yellow_card",
+  "red_card"
+]);
 
 interface RosterPlayer extends Player {
   // Which side of THIS match the player represents - stamped locally when the
@@ -612,6 +629,23 @@ export function LiveMatchAdminModal({
     }
   }
 
+  // Undoes a wrong tap during live scoring (wrong player, wrong action) - not the same as
+  // handleReopen above, which only undoes an accidental *finish*.
+  async function handleUndo() {
+    if (!matchDetail) return;
+    setActionBusy(true);
+    setActionError("");
+    try {
+      const updated = await undoLastMatchEvent(matchDetail.id);
+      setMatchDetail(updated);
+      setChanged(true);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Akcija nije ponistena.");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   function resetToSetup() {
     setMatchDetail(null);
     setPlayers([]);
@@ -698,6 +732,7 @@ export function LiveMatchAdminModal({
             pendingGoal={pendingGoal}
             onConfirmGoal={confirmGoal}
             onFinish={finishMatch}
+            onUndo={handleUndo}
             onNewMatch={resetToSetup}
             busy={actionBusy}
             error={actionError}
@@ -1258,6 +1293,7 @@ function LivePhase({
   pendingGoal,
   onConfirmGoal,
   onFinish,
+  onUndo,
   onNewMatch,
   busy,
   error
@@ -1276,6 +1312,7 @@ function LivePhase({
   pendingGoal: PendingGoal | null;
   onConfirmGoal: (assistantId: string | null) => void;
   onFinish: () => void;
+  onUndo: () => void;
   onNewMatch: () => void;
   busy: boolean;
   error: string;
@@ -1441,6 +1478,13 @@ function LivePhase({
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
+          <PrimaryButton
+            label="Ponisti poslednju akciju"
+            onPress={onUndo}
+            disabled={busy || !events.some((event) => UNDOABLE_EVENT_TYPES.has(event.type))}
+            loading={busy}
+            variant="ghost"
+          />
           <PrimaryButton label={busy ? "..." : "Kraj utakmice"} onPress={onFinish} loading={busy} variant="danger" />
         </Card>
 

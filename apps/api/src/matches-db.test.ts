@@ -9,6 +9,7 @@ import {
   setMatchPeriodDb,
   setMatchStatusDb,
   submitMatchPredictionDb,
+  undoLastMatchEventDb,
   upsertLineupDb
 } from "./matches-db.ts";
 import { query } from "./db.ts";
@@ -675,6 +676,153 @@ describe("addMatchEventDb", () => {
       const home = standings.find((row) => row.team_id === homeTeamId);
       assert.equal(home?.played, 0);
       assert.equal(home?.points, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+describe("undoLastMatchEventDb", () => {
+  // Real incident: an admin's finger slipped and tapped the wrong player/action during
+  // live scoring, with no way back except editing the database directly.
+  test("reverses a goal - score, scorer stats, and the event itself", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const scorer = await createTestPlayer(tracker, homeTeamId, "__test__ scorer");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await addMatchEventDb(matchId, { type: "goal", minute: 23, teamId: homeTeamId, playerId: scorer }, testActor);
+
+      const detail = await undoLastMatchEventDb(matchId, testActor);
+
+      assert.equal(detail.homeScore, 0);
+      assert.equal(detail.awayScore, 0);
+      const stats = detail.playerStats.find((s) => s.playerId === scorer);
+      assert.equal(stats?.goals ?? 0, 0);
+      assert.equal(stats?.fantasyPoints ?? 0, 0);
+      assert.equal(detail.events.filter((e) => e?.type === "goal").length, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("reverses a goal's assist along with the goal itself", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const scorer = await createTestPlayer(tracker, homeTeamId, "__test__ scorer");
+      const assister = await createTestPlayer(tracker, homeTeamId, "__test__ assister");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await addMatchEventDb(
+        matchId,
+        { type: "goal", minute: 40, teamId: homeTeamId, playerId: scorer, relatedPlayerId: assister },
+        testActor
+      );
+
+      const detail = await undoLastMatchEventDb(matchId, testActor);
+
+      const assisterStats = detail.playerStats.find((s) => s.playerId === assister);
+      assert.equal(assisterStats?.assists ?? 0, 0);
+      assert.equal(assisterStats?.fantasyPoints ?? 0, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("reverses a card without touching the score", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const defender = await createTestPlayer(tracker, awayTeamId, "__test__ defender", "odbrana");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await addMatchEventDb(matchId, { type: "yellow_card", minute: 55, teamId: awayTeamId, playerId: defender }, testActor);
+
+      const detail = await undoLastMatchEventDb(matchId, testActor);
+
+      const stats = detail.playerStats.find((s) => s.playerId === defender);
+      assert.equal(stats?.yellowCards ?? 0, 0);
+      assert.equal(stats?.fantasyPoints ?? 0, 0);
+      assert.equal(detail.homeScore, 0);
+      assert.equal(detail.awayScore, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("only undoes the single most recent action, leaving earlier ones alone", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const scorer = await createTestPlayer(tracker, homeTeamId, "__test__ brace scorer");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await addMatchEventDb(matchId, { type: "goal", minute: 12, teamId: homeTeamId, playerId: scorer }, testActor);
+      await addMatchEventDb(matchId, { type: "goal", minute: 78, teamId: homeTeamId, playerId: scorer }, testActor);
+
+      const detail = await undoLastMatchEventDb(matchId, testActor);
+
+      assert.equal(detail.homeScore, 1);
+      const stats = detail.playerStats.find((s) => s.playerId === scorer);
+      assert.equal(stats?.goals, 1);
+      assert.equal(stats?.fantasyPoints, 5);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("skips over clock events to undo the last real player action", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const scorer = await createTestPlayer(tracker, homeTeamId, "__test__ scorer");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await addMatchEventDb(matchId, { type: "goal", minute: 12, teamId: homeTeamId, playerId: scorer }, testActor);
+      await setMatchPeriodDb(matchId, { period: "halftime" }, testActor);
+
+      const detail = await undoLastMatchEventDb(matchId, testActor);
+
+      assert.equal(detail.homeScore, 0);
+      // The halftime clock event is untouched - only the goal (the last real player
+      // action) was undone.
+      assert.equal(detail.events.filter((e) => e?.type === "halftime").length, 1);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects undoing on a finished match", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const scorer = await createTestPlayer(tracker, homeTeamId, "__test__ scorer");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await addMatchEventDb(matchId, { type: "goal", minute: 12, teamId: homeTeamId, playerId: scorer }, testActor);
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+
+      await assert.rejects(
+        () => undoLastMatchEventDb(matchId, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects undoing when there's nothing to undo", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+
+      await assert.rejects(
+        () => undoLastMatchEventDb(matchId, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
     } finally {
       await cleanupTestData(tracker);
     }

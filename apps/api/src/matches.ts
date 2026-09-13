@@ -7,6 +7,7 @@ import {
   listLiveMatchesDb,
   reopenMatchDb,
   setMatchMediaDb,
+  undoLastMatchEventDb,
   setMatchPeriodDb,
   setMatchStatusDb,
   submitMatchPredictionDb,
@@ -72,6 +73,11 @@ export async function setMatchPeriod(matchId: string, payload: any, actor: Actor
 export async function reopenMatch(matchId: string, actor: Actor) {
   if (hasDatabase()) return reopenMatchDb(matchId, actor);
   throw httpError(501, "Vracanje utakmice zahteva bazu podataka.");
+}
+
+export async function undoLastMatchEvent(matchId: string, actor: Actor) {
+  if (hasDatabase()) return undoLastMatchEventDb(matchId, actor);
+  throw httpError(501, "Ponistavanje akcije zahteva bazu podataka.");
 }
 
 export async function updateMatch(matchId: string, payload: any, actor: Actor) {
