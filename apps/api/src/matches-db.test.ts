@@ -10,6 +10,7 @@ import {
   setMatchStatusDb,
   submitMatchPredictionDb,
   undoLastMatchEventDb,
+  updateMatchDb,
   upsertLineupDb
 } from "./matches-db.ts";
 import { query } from "./db.ts";
@@ -147,6 +148,35 @@ describe("setMatchStatusDb", () => {
       assert.equal(away?.played, 1);
       assert.equal(away?.losses, 1);
       assert.equal(away?.points, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  // Regression test for a real incident: a team withdrew mid-season (KNS Trans, Tribali
+  // liga Sabac), got deactivated, and its already-played match got cancelled to void the
+  // result. Its team_standings row from before was never deleted, since nothing ever
+  // recomputes a row for a team that's both inactive and has zero remaining counted
+  // matches - it just sat there forever as a stale ghost entry, still showing in the table.
+  test("a deactivated team's standings row disappears once its match is cancelled", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 3, awayScore: 1 }, testActor);
+
+      let standings = await fetchStandings(competitionId);
+      assert.ok(standings.some((row) => row.team_id === awayTeamId), "sanity check: the row exists before withdrawing");
+
+      // Mirrors the real fix: the withdrawing team is deactivated, then its match voided.
+      await query("update public.teams set is_active = false where id = $1", [awayTeamId]);
+      await updateMatchDb(matchId, { status: "cancelled" }, testActor);
+
+      standings = await fetchStandings(competitionId);
+      assert.equal(standings.find((row) => row.team_id === awayTeamId), undefined);
+      // The surviving, still-active team is untouched (just no longer has a played game).
+      const home = standings.find((row) => row.team_id === homeTeamId);
+      assert.equal(home?.played, 0);
     } finally {
       await cleanupTestData(tracker);
     }

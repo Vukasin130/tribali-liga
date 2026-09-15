@@ -869,6 +869,16 @@ export async function recalculateCompetitionStandings(client: PoolClient, compet
       ]
     );
   }
+
+  // A team that no longer has any counted match at all (deactivated mid-season with its
+  // history cancelled, e.g.) never gets touched by the upsert loop above - it simply has
+  // no row to compute. Without this, its old team_standings row from before would sit
+  // there forever, a ghost entry nothing ever overwrites again.
+  const keepTeamIds = standings.map((row) => row.teamId);
+  await client.query(`delete from public.team_standings where competition_id = $1 and team_id <> all($2::uuid[])`, [
+    competitionId,
+    keepTeamIds
+  ]);
 }
 
 // player_season_stats backs the leaders/search screens and the fantasy pool's
