@@ -227,6 +227,110 @@ describe("runFantasyGameweekSweep", () => {
     }
   });
 
+  // Real complaint: a manager who never saves a new team for a round used to score a
+  // blank squad instead of keeping last round's - FantasyScreen only ever pre-fills the
+  // previous picks as a suggestion on screen, it never actually saves them on its own.
+  test("a manager who never saved a team for the newly-locked round keeps last round's picks", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      // Sweep's own week-derivation needs at least one real match to not bail out early -
+      // dated well outside round1/round2's window below so it can't collide with them.
+      await createTestMatch(tracker, competitionId, home, await createTestTeam(tracker, competitionId, "__test__ away"), daysFromNow(-30));
+
+      const gk = await createTestPlayer(tracker, home, "__test__ gk", "golman");
+      const def1 = await createTestPlayer(tracker, home, "__test__ def1", "odbrana");
+      const def2 = await createTestPlayer(tracker, home, "__test__ def2", "odbrana");
+      const att1 = await createTestPlayer(tracker, home, "__test__ att1", "napad");
+      const att2 = await createTestPlayer(tracker, home, "__test__ att2", "napad");
+      const bench = await Promise.all([1, 2, 3, 4, 5].map((n) => createTestPlayer(tracker, home, `__test__ bench${n}`, "napad")));
+      const squad = [
+        { playerId: gk, slot: "GK", isCaptain: true },
+        { playerId: def1, slot: "DEF1" },
+        { playerId: def2, slot: "DEF2" },
+        { playerId: att1, slot: "ATT1" },
+        { playerId: att2, slot: "ATT2" },
+        { playerId: bench[0], slot: "B1" },
+        { playerId: bench[1], slot: "B2" },
+        { playerId: bench[2], slot: "B3" },
+        { playerId: bench[3], slot: "B4" },
+        { playerId: bench[4], slot: "B5" }
+      ];
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      for (const pick of squad) {
+        await setFantasyPoolPlayerPrice(seasonId, pick.playerId, { price: 4, isPriceLocked: true }, testActor);
+      }
+
+      // Round 1's own deadline is still ahead of "now" (its phase must be "open" for the
+      // save below to succeed at all) - what matters for carrying forward is only that it
+      // started before round 2, not that it's already played out itself.
+      const round1Id = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-6),
+        locksAt: hoursFromNow(1),
+        endsAt: daysFromNow(2),
+        status: "open"
+      });
+      // Starts out with its deadline still ahead, so the diligent manager's own save
+      // below goes through the normal "open" path rather than "reposition" (which
+      // assumes an existing squad to reposition, not a brand new one) - the deadline is
+      // only pushed into the past afterward, once that save has already gone through.
+      const round2Id = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-1),
+        locksAt: hoursFromNow(2),
+        endsAt: daysFromNow(1),
+        status: "open"
+      });
+
+      const savesEveryRound = await createTestUser(tracker, "__test__ diligent manager");
+      const neverTouchesRound2 = await createTestUser(tracker, "__test__ forgetful manager");
+
+      // Both managers build the exact same squad for round 1.
+      for (const userId of [savesEveryRound, neverTouchesRound2]) {
+        await setFantasySeasonPicks({ id: userId, role: "fan" }, { fantasySeasonId: seasonId, fantasyGameweekId: round1Id, picks: squad });
+      }
+      // Only the diligent one also explicitly saves a team for round 2 (different
+      // captain, so it's distinguishable from a carried-forward copy of round 1).
+      const round2Squad = squad.map((pick) => ({ ...pick, isCaptain: pick.slot === "DEF1" }));
+      await setFantasySeasonPicks(
+        { id: savesEveryRound, role: "fan" },
+        { fantasySeasonId: seasonId, fantasyGameweekId: round2Id, picks: round2Squad }
+      );
+
+      // Now the deadline passes - already past its own window's end being the trigger for
+      // the sweep to transition it open -> locked on the very next call.
+      await query("update public.fantasy_gameweeks set locks_at = $2 where id = $1", [round2Id, hoursFromNow(-1).toISOString()]);
+
+      await runFantasyGameweekSweep();
+
+      const lockedStatus = await query<{ status: string }>("select status from public.fantasy_gameweeks where id = $1", [round2Id]);
+      assert.equal(lockedStatus.rows[0]?.status, "locked");
+
+      // The diligent manager's own round-2 choice (DEF1 as captain) is untouched.
+      const diligentPicks = await query<{ slot: string; is_captain: boolean }>(
+        "select slot, is_captain from public.fantasy_team_picks ftp join public.fantasy_teams ft on ft.id = ftp.fantasy_team_id where ft.user_id = $1 and ftp.fantasy_gameweek_id = $2",
+        [savesEveryRound, round2Id]
+      );
+      assert.equal(diligentPicks.rows.length, 10);
+      assert.equal(diligentPicks.rows.find((row) => row.is_captain)?.slot, "DEF1");
+
+      // The forgetful manager never saved round 2 - it's now an exact copy of their
+      // round-1 squad, GK as captain, not an empty/zeroed team.
+      const forgetfulPicks = await query<{ player_id: string; slot: string; is_captain: boolean }>(
+        "select player_id, slot, is_captain from public.fantasy_team_picks ftp join public.fantasy_teams ft on ft.id = ftp.fantasy_team_id where ft.user_id = $1 and ftp.fantasy_gameweek_id = $2",
+        [neverTouchesRound2, round2Id]
+      );
+      assert.equal(forgetfulPicks.rows.length, 10);
+      assert.equal(forgetfulPicks.rows.find((row) => row.is_captain)?.player_id, gk);
+      const forgetfulSlots = new Set(forgetfulPicks.rows.map((row) => row.slot));
+      assert.equal(forgetfulSlots.size, 10);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
   // Regression test for a real incident: an admin schedule change that touches many
   // future weeks at once (adding a return leg, weaving a mid-season team into a dozen
   // future rounds) used to fire one real push per newly-created week, all at once - a

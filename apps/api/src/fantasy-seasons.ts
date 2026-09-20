@@ -662,6 +662,12 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
     if (now < endsAtMs) {
       if (round.status !== "locked") {
         await query("update public.fantasy_gameweeks set status = 'locked', updated_at = now() where id = $1", [round.id]);
+        // The deadline for this round just passed for the first time - anyone who never
+        // saved a team for it keeps whatever they had last round instead of being
+        // silently zeroed out. FantasyScreen already pre-fills a manager's previous
+        // picks as a starting point while they're editing, but that's UI-only until they
+        // press save - this is what actually makes it real when they never do.
+        await carryForwardMissingPicks(round.id);
       }
       continue;
     }
@@ -676,6 +682,38 @@ async function sweepFantasySeasonGameweeks(seasonId: string): Promise<void> {
       }
     }
   }
+}
+
+// Copies every team's previous-round picks into the round that just locked, but only for
+// a team that doesn't already have any picks of its own there - i.e. never overwrites a
+// squad someone actually saved, only fills in for someone who left the pre-filled default
+// sitting on screen and never pressed save. "Previous round" is whichever gameweek in this
+// season started right before this one; if there isn't one (this is the season's first
+// round), there's nothing to carry forward and this is a no-op.
+async function carryForwardMissingPicks(gameweekId: string): Promise<void> {
+  const previous = await query(
+    `select id from public.fantasy_gameweeks
+     where fantasy_season_id = (select fantasy_season_id from public.fantasy_gameweeks where id = $1)
+       and starts_at < (select starts_at from public.fantasy_gameweeks where id = $1)
+     order by starts_at desc
+     limit 1`,
+    [gameweekId]
+  );
+  const previousGameweekId = previous.rows[0]?.id;
+  if (!previousGameweekId) return;
+
+  await query(
+    `insert into public.fantasy_team_picks (fantasy_team_id, player_id, fantasy_gameweek_id, slot, is_captain)
+     select fantasy_team_id, player_id, $2, slot, is_captain
+     from public.fantasy_team_picks
+     where fantasy_gameweek_id = $1
+       and not exists (
+         select 1 from public.fantasy_team_picks existing
+         where existing.fantasy_team_id = fantasy_team_picks.fantasy_team_id
+           and existing.fantasy_gameweek_id = $2
+       )`,
+    [previousGameweekId, gameweekId]
+  );
 }
 
 export async function getFantasySeasonTeam(user: Actor | null, seasonId: string, fantasyGameweekId?: string) {
