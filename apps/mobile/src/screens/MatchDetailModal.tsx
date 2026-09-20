@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet,
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchCompetitionStandings, fetchLeaders, fetchMatchDetail, setMatchMedia, setMatchStatus, submitMatchPrediction, updateMatch } from "../api/endpoints";
+import { deleteMatch, fetchCompetitionStandings, fetchLeaders, fetchMatchDetail, setMatchMedia, setMatchStatus, submitMatchPrediction, updateMatch } from "../api/endpoints";
 import type { LeaderEntry, MatchDetail, MatchLineupEntry, StandingGroup } from "../api/types";
 import { Card, EmptyState, ErrorState, LoadingState, Pill, PrimaryButton } from "../components/ui";
 import { colors, gradients } from "../theme/colors";
@@ -136,6 +136,9 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
   const [mediaMessage, setMediaMessage] = useState("");
   const [predicting, setPredicting] = useState(false);
   const [predictError, setPredictError] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [tab, setTab] = useState<Tab>("detalji");
   const [tabelaTab, setTabelaTab] = useState<TabelaSubTab>("table");
   const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
@@ -253,6 +256,26 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
     }
   }
 
+  async function handleDeleteMatch() {
+    if (!detail) return;
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteMatch(detail.id);
+      queryClient.invalidateQueries({ queryKey: ["seasonHub"] });
+      queryClient.invalidateQueries({ queryKey: ["competitionStandings"] });
+      onClose();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Utakmica nije obrisana.");
+      setDeleting(false);
+      setConfirmingDelete(false);
+    }
+  }
+
   async function handleSaveMedia() {
     if (!detail) return;
     const url = youtubeUrl.trim();
@@ -300,6 +323,7 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
   const isPlayed = detail?.status === "finished";
   const isLive = detail?.status === "live";
   const isScheduled = detail?.status === "scheduled";
+  const isCancelled = detail?.status === "cancelled";
 
   const homeGoals = detail ? events.filter((event) => event.type === "goal" && event.teamId === detail.homeTeamId) : [];
   const awayGoals = detail ? events.filter((event) => event.type === "goal" && event.teamId === detail.awayTeamId) : [];
@@ -541,6 +565,22 @@ export function MatchDetailModal({ matchId, onClose }: { matchId: string; onClos
                       </View>
                       {saveMessage ? <Text style={styles.adminMessage}>{saveMessage}</Text> : null}
                       <PrimaryButton label={saving ? "Cuvanje..." : "Sacuvaj termin"} onPress={handleSaveMatch} loading={saving} />
+                    </Card>
+                  ) : null}
+
+                  {isAdmin && isCancelled ? (
+                    <Card style={{ gap: 10 }}>
+                      <Text style={styles.sectionLabel}>Admin - otkazana utakmica</Text>
+                      <Text style={styles.flowCopy}>
+                        Ova utakmica je otkazana i vise se ne racuna nigde, ali i dalje stoji u rasporedu. Brisanje je trajno uklanja iz baze - koristi ovo samo ako mec zaista nikad nije trebalo da postoji (npr. ekipa je izbacena iz lige).
+                      </Text>
+                      {deleteError ? <Text style={styles.adminMessage}>{deleteError}</Text> : null}
+                      <PrimaryButton
+                        label={deleting ? "Brisanje..." : confirmingDelete ? "Potvrdi brisanje utakmice" : "Obrisi utakmicu"}
+                        onPress={handleDeleteMatch}
+                        loading={deleting}
+                        variant="danger"
+                      />
                     </Card>
                   ) : null}
 

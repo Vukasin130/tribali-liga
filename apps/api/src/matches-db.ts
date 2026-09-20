@@ -410,6 +410,25 @@ export async function updateMatchDb(matchId: string, payload: UpdateMatchPayload
   return getMatchDetailDb(matchId);
 }
 
+// A cancelled match (see updateMatchDb, status='cancelled') is already excluded from
+// standings and player stats, but it still shows up in every fixture list forever -
+// which reads as a real, confusing fixture to anyone browsing the schedule (e.g. after a
+// team is kicked out of a league). This actually removes the row - every dependent table
+// (match_events, match_lineups, player_match_stats, match_predictions,
+// player_match_availability) cascades on delete, so nothing is left orphaned. Only ever
+// meant for a match that's already been cancelled and reflects nobody's real result.
+export async function deleteMatchDb(matchId: string, actor: Actor): Promise<{ id: string }> {
+  const result = await query<{ id: string; competition_id: string; status: string }>(
+    `delete from public.matches where id = $1 returning id, competition_id, status`,
+    [matchId]
+  );
+  if (!result.rows[0]) throw httpError(404, "Utakmica nije pronadjena.");
+  await recalculateCompetitionStandings({ query } as unknown as PoolClient, result.rows[0].competition_id);
+  await recalculatePlayerSeasonStats({ query } as unknown as PoolClient, result.rows[0].competition_id);
+  await audit(actor, "match.delete", "match", matchId, { competitionId: result.rows[0].competition_id, status: result.rows[0].status });
+  return { id: matchId };
+}
+
 interface LineupPlayerInput {
   playerId?: string;
   teamId?: string;

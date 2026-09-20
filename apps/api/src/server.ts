@@ -44,6 +44,7 @@ import {
   setMatchMedia,
   reopenMatch,
   undoLastMatchEvent,
+  deleteMatch,
   setMatchPeriod,
   setMatchStatus,
   submitMatchPrediction,
@@ -1046,6 +1047,12 @@ const server = http.createServer(async (req, res) => {
     if (adminMatchUpdateMatch && req.method === "PATCH") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await updateMatch(adminMatchUpdateMatch[1], await readJson(req), sessionUser) });
+      return;
+    }
+
+    if (adminMatchUpdateMatch && req.method === "DELETE") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await deleteMatch(adminMatchUpdateMatch[1], sessionUser) });
       return;
     }
 

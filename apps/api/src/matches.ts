@@ -3,6 +3,7 @@ import { hasDatabase } from "./db.ts";
 import {
   addMatchEventDb,
   createMatchDb,
+  deleteMatchDb,
   getMatchDetailDb,
   listLiveMatchesDb,
   reopenMatchDb,
@@ -78,6 +79,11 @@ export async function reopenMatch(matchId: string, actor: Actor) {
 export async function undoLastMatchEvent(matchId: string, actor: Actor) {
   if (hasDatabase()) return undoLastMatchEventDb(matchId, actor);
   throw httpError(501, "Ponistavanje akcije zahteva bazu podataka.");
+}
+
+export async function deleteMatch(matchId: string, actor: Actor) {
+  if (hasDatabase()) return deleteMatchDb(matchId, actor);
+  throw httpError(501, "Brisanje utakmice zahteva bazu podataka.");
 }
 
 export async function updateMatch(matchId: string, payload: any, actor: Actor) {

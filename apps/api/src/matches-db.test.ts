@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   addMatchEventDb,
+  deleteMatchDb,
   getMatchDetailDb,
   listLiveMatchesDb,
   reopenMatchDb,
@@ -709,6 +710,50 @@ describe("addMatchEventDb", () => {
     } finally {
       await cleanupTestData(tracker);
     }
+  });
+});
+
+describe("deleteMatchDb", () => {
+  // Real incident: a team was kicked out of a league mid-season and its fixtures were
+  // cancelled (status='cancelled', see updateMatchDb), but a cancelled match still shows
+  // up in every fixture list forever - confusing to browse. This actually removes the row.
+  test("removes the match and every dependent row, and standings recalculate as if it never happened", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const scorer = await createTestPlayer(tracker, homeTeamId, "__test__ scorer");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(-1), { status: "live" });
+      await addMatchEventDb(matchId, { type: "goal", minute: 23, teamId: homeTeamId, playerId: scorer }, testActor);
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+
+      let standings = await fetchStandings(competitionId);
+      assert.equal(standings.find((row) => row.team_id === homeTeamId)?.played, 1);
+
+      await deleteMatchDb(matchId, testActor);
+
+      const remainingMatch = await query("select id from public.matches where id = $1", [matchId]);
+      assert.equal(remainingMatch.rowCount, 0);
+      const remainingEvents = await query("select id from public.match_events where match_id = $1", [matchId]);
+      assert.equal(remainingEvents.rowCount, 0);
+      const remainingStats = await query("select id from public.player_match_stats where match_id = $1", [matchId]);
+      assert.equal(remainingStats.rowCount, 0);
+
+      standings = await fetchStandings(competitionId);
+      const home = standings.find((row) => row.team_id === homeTeamId);
+      assert.equal(home?.played ?? 0, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects a match id that does not exist", async () => {
+    await assert.rejects(
+      () => deleteMatchDb(randomUUID(), testActor),
+      (error: any) => {
+        assert.equal(error.statusCode, 404);
+        return true;
+      }
+    );
   });
 });
 

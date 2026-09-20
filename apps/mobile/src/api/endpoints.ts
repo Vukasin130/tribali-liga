@@ -236,6 +236,14 @@ export function undoLastMatchEvent(matchId: string) {
   return apiPost<MatchDetail>(`/admin/matches/${matchId}/undo-last-event`, {});
 }
 
+// Actually removes a match (and every event/lineup/stat tied to it) instead of just
+// leaving it sitting there marked cancelled - use for a fixture that never happened at
+// all (e.g. a team withdrew from the league), not for a real result you want voided but
+// remembered.
+export function deleteMatch(matchId: string) {
+  return apiDelete<{ id: string }>(`/admin/matches/${matchId}`);
+}
+
 export function setMatchMedia(matchId: string, payload: { kind?: string; label?: string; url: string }) {
   return apiPatch<MediaLink>(`/admin/matches/${matchId}/media`, payload);
 }
