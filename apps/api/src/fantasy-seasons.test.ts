@@ -2,6 +2,7 @@ import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   createFantasySeason,
+  releaseAllLockedPrices,
   runFantasyGameweekSweep,
   scoreFantasySeasonGameweek,
   setFantasyPoolPlayerAvailability,
@@ -649,6 +650,58 @@ describe("setFantasyPoolPlayerPrice / setFantasyPoolPlayerAvailability", () => {
       const toggled = await setFantasyPoolPlayerAvailability(seasonId, player, { isAvailable: false }, testActor);
       assert.equal(toggled.displayName, "__test__ regression player");
       assert.equal(toggled.teamName, "__test__ regression team");
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+// A manual price edit locks the player unless isPriceLocked: false is passed explicitly
+// (see setFantasyPoolPlayerPrice), so a whole pass of "set a fair starting price for every
+// notable player" silently freezes each of them out of automatic movement forever - this
+// is exactly what happened to the live pool. releaseAllLockedPrices is the bulk undo.
+describe("releaseAllLockedPrices", () => {
+  test("unlocks every locked player in the season and leaves others untouched", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const team = await createTestTeam(tracker, competitionId);
+      const locked1 = await createTestPlayer(tracker, team);
+      const locked2 = await createTestPlayer(tracker, team);
+      const neverLocked = await createTestPlayer(tracker, team);
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+
+      await setFantasyPoolPlayerPrice(seasonId, locked1, { price: 9, isPriceLocked: true }, testActor);
+      await setFantasyPoolPlayerPrice(seasonId, locked2, { price: 7, isPriceLocked: true }, testActor);
+      await setFantasyPoolPlayerPrice(seasonId, neverLocked, { price: 5, isPriceLocked: false }, testActor);
+
+      const result = await releaseAllLockedPrices(seasonId, testActor);
+      assert.equal(result.released, 2);
+
+      const rows = await query<{ player_id: string; is_price_locked: boolean }>(
+        "select player_id, is_price_locked from public.fantasy_player_pool where fantasy_season_id = $1",
+        [seasonId]
+      );
+      for (const row of rows.rows) {
+        assert.equal(row.is_price_locked, false, `${row.player_id} should be unlocked`);
+      }
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("does nothing when no players are locked", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const team = await createTestTeam(tracker, competitionId);
+      await createTestPlayer(tracker, team);
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+
+      const result = await releaseAllLockedPrices(seasonId, testActor);
+      assert.equal(result.released, 0);
     } finally {
       await cleanupTestData(tracker);
     }

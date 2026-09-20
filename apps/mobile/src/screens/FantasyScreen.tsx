@@ -13,6 +13,7 @@ import {
   setFantasyPoolPlayerAvailability,
   setFantasyPoolPlayerPrice,
   syncFantasySeasonPool,
+  releaseAllLockedPrices,
   updateFantasySeason
 } from "../api/endpoints";
 import type {
@@ -94,6 +95,7 @@ export function FantasyScreen() {
   const [editSeasonComposer, setEditSeasonComposer] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
   const [adminError, setAdminError] = useState("");
   const [confirmingFinishSeason, setConfirmingFinishSeason] = useState(false);
   const [editingPriceId, setEditingPriceId] = useState("");
@@ -233,6 +235,22 @@ export function FantasyScreen() {
       setAdminError(err instanceof ApiError ? err.message : "Sinhronizacija fantasy baze nije uspela.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleUnlockAll() {
+    if (!season) return;
+    setUnlocking(true);
+    setSyncMessage("");
+    setAdminError("");
+    try {
+      const result = await releaseAllLockedPrices(season.id);
+      setSyncMessage(`Otkljucano ${result.released} cena - sada ce se menjati iz kola u kolo kao i sve ostale.`);
+      await load();
+    } catch (err) {
+      setAdminError(err instanceof ApiError ? err.message : "Otkljucavanje cena nije uspelo.");
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -985,6 +1003,15 @@ export function FantasyScreen() {
                   disabled={syncing}
                 >
                   <Text style={styles.adminActionButtonPrimaryText}>{syncing ? "Sinhronizujem..." : "Sinhronizuj fantasy bazu"}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.adminActionButton, unlocking ? styles.adminActionButtonDisabled : null]}
+                  onPress={handleUnlockAll}
+                  disabled={unlocking}
+                >
+                  <Text style={styles.adminActionButtonText}>
+                    {unlocking ? "Otkljucavam..." : "Otkljucaj sve zakljucane cene"}
+                  </Text>
                 </TouchableOpacity>
               </View>
 

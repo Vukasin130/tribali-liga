@@ -375,6 +375,24 @@ async function cancelOverBudgetTeamPicks(seasonId: string, actor: Actor | null):
   }
 }
 
+// A one-time preseason price edit locks the player forever (see setFantasyPoolPlayerPrice
+// above) unless the admin explicitly passes isPriceLocked: false - which the mobile UI's
+// price-edit flow never does by default, so a whole pass of "set a fair starting price for
+// each notable player" silently freezes every one of them out of automatic movement from
+// then on. Lets an admin release every currently-locked player in a season back to the
+// normal per-round formula in one call, rather than unlocking them one at a time.
+export async function releaseAllLockedPrices(seasonId: string, actor: Actor): Promise<{ released: number }> {
+  const result = await query(
+    `update public.fantasy_player_pool
+       set is_price_locked = false, updated_at = now()
+     where fantasy_season_id = $1 and is_price_locked = true
+     returning id`,
+    [seasonId]
+  );
+  await audit(actor, "fantasy.season.pool.release-all-locked", "fantasySeason", seasonId, { released: result.rowCount });
+  return { released: result.rowCount || 0 };
+}
+
 // Admin accept/reject for the pool - syncFantasySeasonPool re-marks a player
 // available automatically once their team_rosters membership is valid again,
 // so this is only meant for a deliberate exclusion (e.g. player left the

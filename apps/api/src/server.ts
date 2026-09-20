@@ -72,6 +72,7 @@ import {
   runFantasyGameweekSweep,
   setFantasyPoolPlayerAvailability,
   setFantasyPoolPlayerPrice,
+  releaseAllLockedPrices,
   setFantasySeasonPicks,
   syncFantasySeasonPool,
   updateFantasySeason
@@ -940,6 +941,13 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         data: await setFantasyPoolPlayerPrice(adminFantasySeasonPriceMatch[1], adminFantasySeasonPriceMatch[2], await readJson(req), sessionUser)
       });
+      return;
+    }
+
+    const adminFantasySeasonUnlockAllMatch = url.pathname.match(/^\/admin\/fantasy-seasons\/([^/]+)\/pool\/unlock-all$/);
+    if (adminFantasySeasonUnlockAllMatch && req.method === "POST") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await releaseAllLockedPrices(adminFantasySeasonUnlockAllMatch[1], sessionUser) });
       return;
     }
 
