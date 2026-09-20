@@ -73,6 +73,7 @@ import {
   setFantasyPoolPlayerAvailability,
   setFantasyPoolPlayerPrice,
   releaseAllLockedPrices,
+  backfillUnmovedPlayerPrices,
   setFantasySeasonPicks,
   syncFantasySeasonPool,
   updateFantasySeason
@@ -948,6 +949,13 @@ const server = http.createServer(async (req, res) => {
     if (adminFantasySeasonUnlockAllMatch && req.method === "POST") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await releaseAllLockedPrices(adminFantasySeasonUnlockAllMatch[1], sessionUser) });
+      return;
+    }
+
+    const adminFantasySeasonBackfillMatch = url.pathname.match(/^\/admin\/fantasy-seasons\/([^/]+)\/pool\/backfill-unmoved$/);
+    if (adminFantasySeasonBackfillMatch && req.method === "POST") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await backfillUnmovedPlayerPrices(adminFantasySeasonBackfillMatch[1], sessionUser) });
       return;
     }
 

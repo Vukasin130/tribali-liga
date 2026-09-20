@@ -1,6 +1,7 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  backfillUnmovedPlayerPrices,
   createFantasySeason,
   releaseAllLockedPrices,
   runFantasyGameweekSweep,
@@ -702,6 +703,92 @@ describe("releaseAllLockedPrices", () => {
 
       const result = await releaseAllLockedPrices(seasonId, testActor);
       assert.equal(result.released, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+describe("backfillUnmovedPlayerPrices", () => {
+  // The real-world case this exists for: a player locked before the season's first round
+  // ever scored sat frozen at the exact same price through several already-finished
+  // rounds. Unlocking them (releaseAllLockedPrices) only stops them being skipped from
+  // here on - this replays the rounds they missed so they land where they'd already be
+  // if they had never been locked in the first place.
+  test("catches a newly-unlocked player up on every round it missed, most-recent delta only", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const frozen = await createTestPlayer(tracker, home, "__test__ frozen star");
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      const startingPrice = 8;
+      await setFantasyPoolPlayerPrice(seasonId, frozen, { price: startingPrice, isPriceLocked: true }, testActor);
+
+      const match1 = await createTestMatch(tracker, competitionId, home, away, daysFromNow(-4), { status: "finished" });
+      await createTestPlayerMatchStats(match1, home, frozen, { fantasyPoints: 12 });
+      const round1Id = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-5),
+        locksAt: daysFromNow(-4),
+        endsAt: daysFromNow(-3)
+      });
+      await scoreFantasySeasonGameweek(round1Id, testActor);
+
+      const match2 = await createTestMatch(tracker, competitionId, home, away, daysFromNow(-1), { status: "finished" });
+      await createTestPlayerMatchStats(match2, home, frozen, { fantasyPoints: 12 });
+      const round2Id = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-2),
+        locksAt: daysFromNow(-1),
+        endsAt: hoursFromNow(-1)
+      });
+      await scoreFantasySeasonGameweek(round2Id, testActor);
+
+      // Still exactly the locked-in price after two scored rounds - the freeze in effect.
+      const beforeUnlock = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, frozen]
+      );
+      assert.equal(Number(beforeUnlock.rows[0]?.current_price), startingPrice);
+
+      await releaseAllLockedPrices(seasonId, testActor);
+      const result = await backfillUnmovedPlayerPrices(seasonId, testActor);
+      assert.equal(result.roundsReplayed, 2);
+      assert.equal(result.playersMoved, 1);
+
+      const pool = await query<{ current_price: string; last_price_delta: string }>(
+        `select current_price, last_price_delta from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, frozen]
+      );
+      // 12 points beat the price both rounds - +0.1 each, same as if never locked.
+      assert.equal(Number(pool.rows[0]?.current_price), startingPrice + 0.2);
+      // last_price_delta reflects only the most recent replayed round, not the cumulative total.
+      assert.equal(Number(pool.rows[0]?.last_price_delta), 0.1);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("does nothing when every player has already moved off their base price", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const team = await createTestTeam(tracker, competitionId);
+      const player = await createTestPlayer(tracker, team);
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      await setFantasyPoolPlayerPrice(seasonId, player, { price: 6, isPriceLocked: false }, testActor);
+      // Manually move it off base_price without a locked history to backfill.
+      await query("update public.fantasy_player_pool set current_price = 6.1 where fantasy_season_id = $1 and player_id = $2", [
+        seasonId,
+        player
+      ]);
+
+      const result = await backfillUnmovedPlayerPrices(seasonId, testActor);
+      assert.equal(result.playersMoved, 0);
+      assert.equal(result.roundsReplayed, 0);
     } finally {
       await cleanupTestData(tracker);
     }

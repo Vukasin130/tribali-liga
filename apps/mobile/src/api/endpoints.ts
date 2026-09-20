@@ -430,6 +430,10 @@ export function releaseAllLockedPrices(seasonId: string) {
   return apiPost<{ released: number }>(`/admin/fantasy-seasons/${seasonId}/pool/unlock-all`, {});
 }
 
+export function backfillUnmovedPlayerPrices(seasonId: string) {
+  return apiPost<{ playersMoved: number; roundsReplayed: number }>(`/admin/fantasy-seasons/${seasonId}/pool/backfill-unmoved`, {});
+}
+
 export function setFantasyPoolPlayerAvailability(seasonId: string, playerId: string, isAvailable: boolean) {
   return apiPatch<FantasySeasonPoolPlayer>(`/admin/fantasy-seasons/${seasonId}/pool/${playerId}/availability`, { isAvailable });
 }

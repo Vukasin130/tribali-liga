@@ -14,6 +14,7 @@ import {
   setFantasyPoolPlayerPrice,
   syncFantasySeasonPool,
   releaseAllLockedPrices,
+  backfillUnmovedPlayerPrices,
   updateFantasySeason
 } from "../api/endpoints";
 import type {
@@ -96,6 +97,7 @@ export function FantasyScreen() {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const [unlocking, setUnlocking] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [adminError, setAdminError] = useState("");
   const [confirmingFinishSeason, setConfirmingFinishSeason] = useState(false);
   const [editingPriceId, setEditingPriceId] = useState("");
@@ -251,6 +253,24 @@ export function FantasyScreen() {
       setAdminError(err instanceof ApiError ? err.message : "Otkljucavanje cena nije uspelo.");
     } finally {
       setUnlocking(false);
+    }
+  }
+
+  async function handleBackfillUnmoved() {
+    if (!season) return;
+    setBackfilling(true);
+    setSyncMessage("");
+    setAdminError("");
+    try {
+      const result = await backfillUnmovedPlayerPrices(season.id);
+      setSyncMessage(
+        `Nadoknadjeno: ${result.playersMoved} igraca je dobilo cenu za ${result.roundsReplayed} odigranih kola.`
+      );
+      await load();
+    } catch (err) {
+      setAdminError(err instanceof ApiError ? err.message : "Nadoknada cena nije uspela.");
+    } finally {
+      setBackfilling(false);
     }
   }
 
@@ -1011,6 +1031,15 @@ export function FantasyScreen() {
                 >
                   <Text style={styles.adminActionButtonText}>
                     {unlocking ? "Otkljucavam..." : "Otkljucaj sve zakljucane cene"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.adminActionButton, backfilling ? styles.adminActionButtonDisabled : null]}
+                  onPress={handleBackfillUnmoved}
+                  disabled={backfilling}
+                >
+                  <Text style={styles.adminActionButtonText}>
+                    {backfilling ? "Nadoknadjujem..." : "Nadoknadi cene za odigrana kola"}
                   </Text>
                 </TouchableOpacity>
               </View>

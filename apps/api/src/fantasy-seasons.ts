@@ -393,6 +393,156 @@ export async function releaseAllLockedPrices(seasonId: string, actor: Actor): Pr
   return { released: result.rowCount || 0 };
 }
 
+// releaseAllLockedPrices only stops a player being SKIPPED by future rounds - a player
+// unlocked today still shows the exact price they were frozen at back when they were
+// first locked, because the automatic mover only ever runs once, right when a round ends,
+// and these players weren't eligible for it yet. Nobody is going to be satisfied being told
+// "it'll catch up starting next round" a fourth time, so this replays the same formula
+// scoreFantasySeasonGameweek already applied to everyone else, round by round in order,
+// against only the players who are still sitting exactly at their base_price (a real mover
+// is never touched twice - this only fills in players the automatic pass never reached).
+export async function backfillUnmovedPlayerPrices(seasonId: string, actor: Actor): Promise<{ playersMoved: number; roundsReplayed: number }> {
+  const candidates = await query<{ id: string }>(
+    `select id from public.fantasy_player_pool where fantasy_season_id = $1 and current_price = base_price`,
+    [seasonId]
+  );
+  const candidateIds = candidates.rows.map((row) => row.id);
+  if (!candidateIds.length) return { playersMoved: 0, roundsReplayed: 0 };
+
+  const rounds = await query<{ id: string; starts_at: string; ends_at: string }>(
+    `select id, starts_at, ends_at from public.fantasy_gameweeks
+     where fantasy_season_id = $1 and status = 'finished'
+     order by starts_at asc`,
+    [seasonId]
+  );
+
+  const movedIds = new Set<string>();
+  let finalRoundUpdates: { player_id: string; delta: number }[] = [];
+  await transaction(async (client) => {
+    await client.query(
+      `update public.fantasy_player_pool set last_price_delta = 0 where fantasy_season_id = $1 and id = any($2::uuid[])`,
+      [seasonId, candidateIds]
+    );
+    for (const round of rounds.rows) {
+      const windowEnd = round.ends_at || round.starts_at;
+      const priceUpdates = await client.query<{ player_id: string; delta: number }>(
+        `with season_competitions as (
+           select competition_id from public.fantasy_season_competitions where fantasy_season_id = $1
+         ),
+         round_matches as (
+           select id, home_team_id, away_team_id
+           from public.matches
+           where competition_id in (select competition_id from season_competitions)
+             and scheduled_at >= $2::timestamptz and scheduled_at <= $3::timestamptz
+             and status = 'finished'
+         ),
+         played_teams as (
+           select home_team_id as team_id, id as match_id from round_matches
+           union all
+           select away_team_id as team_id, id as match_id from round_matches
+         ),
+         lineup_matches as (
+           select distinct match_id from public.match_lineups where match_id in (select id from round_matches)
+         ),
+         round_stats as (
+           select player_id, sum(fantasy_points) as points
+           from public.player_match_stats
+           where match_id in (select id from round_matches)
+           group by player_id
+         ),
+         player_matches as (
+           select
+             fpp.id as pool_id,
+             pt.match_id,
+             (pt.match_id in (select match_id from lineup_matches)) as lineup_was_set,
+             exists (
+               select 1 from public.match_lineups ml where ml.match_id = pt.match_id and ml.player_id = fpp.player_id
+             ) as in_lineup
+           from public.fantasy_player_pool fpp
+           join played_teams pt on pt.team_id = fpp.team_id
+           where fpp.id = any($7::uuid[])
+         ),
+         movable as (
+           select
+             fpp.id,
+             fpp.player_id,
+             fpp.current_price as old_price,
+             bool_or(pm.match_id is not null) as played,
+             bool_or(pm.lineup_was_set and not pm.in_lineup) as excluded_from_lineup,
+             coalesce(rs.points, 0) as points
+           from public.fantasy_player_pool fpp
+           left join player_matches pm on pm.pool_id = fpp.id
+           left join round_stats rs on rs.player_id = fpp.player_id
+           where fpp.id = any($7::uuid[])
+           group by fpp.id, fpp.player_id, fpp.current_price, rs.points
+         ),
+         updated as (
+           update public.fantasy_player_pool fpp
+           set current_price = case
+                 when m.excluded_from_lineup then greatest($4::numeric, round(fpp.current_price - $6::numeric, 2))
+                 when m.points > fpp.current_price then round(fpp.current_price + $5::numeric, 2)
+                 when m.points < fpp.current_price then greatest($4::numeric, round(fpp.current_price - $5::numeric, 2))
+                 else fpp.current_price
+               end,
+               updated_at = now()
+           from movable m
+           where fpp.id = m.id and m.played
+           returning fpp.id, fpp.player_id, fpp.current_price as new_price
+         )
+         select u.player_id, (u.new_price - m.old_price) as delta
+         from updated u
+         join movable m on m.id = u.id
+         where u.new_price <> m.old_price`,
+        [seasonId, round.starts_at, windowEnd, MIN_PRICE, PRICE_STEP, LINEUP_EXCLUSION_PENALTY, candidateIds]
+      );
+
+      for (const row of priceUpdates.rows) movedIds.add(row.player_id);
+      finalRoundUpdates = priceUpdates.rows;
+
+      if (priceUpdates.rows.length) {
+        const playerIds = priceUpdates.rows.map((row) => row.player_id);
+        const deltas = priceUpdates.rows.map((row) => Number(row.delta));
+        await client.query(
+          `update public.fantasy_teams ft
+           set budget_cap = ft.budget_cap + moved.delta_sum, updated_at = now()
+           from (
+             select ftp.fantasy_team_id, sum(pd.delta) as delta_sum
+             from public.fantasy_team_picks ftp
+             join unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta) on pd.player_id = ftp.player_id
+             where ftp.fantasy_gameweek_id = $3
+             group by ftp.fantasy_team_id
+           ) moved
+           where ft.id = moved.fantasy_team_id`,
+          [playerIds, deltas, round.id]
+        );
+      }
+    }
+
+    // last_price_delta only ever reflects the most recently finished round's effect (see
+    // scoreFantasySeasonGameweek) - a player who moved in an earlier replayed round but not
+    // the final one correctly ends up back at 0 here, same as everyone else.
+    if (finalRoundUpdates.length) {
+      const playerIds = finalRoundUpdates.map((row) => row.player_id);
+      const deltas = finalRoundUpdates.map((row) => Number(row.delta));
+      await client.query(
+        `update public.fantasy_player_pool fpp
+         set last_price_delta = pd.delta
+         from unnest($1::uuid[], $2::numeric[]) as pd(player_id, delta)
+         where fpp.fantasy_season_id = $3 and fpp.player_id = pd.player_id`,
+        [playerIds, deltas, seasonId]
+      );
+    }
+  });
+
+  await cancelOverBudgetTeamPicks(seasonId, actor);
+  await audit(actor, "fantasy.season.pool.backfill-unmoved", "fantasySeason", seasonId, {
+    candidates: candidateIds.length,
+    playersMoved: movedIds.size,
+    roundsReplayed: rounds.rowCount
+  });
+  return { playersMoved: movedIds.size, roundsReplayed: rounds.rowCount || 0 };
+}
+
 // Admin accept/reject for the pool - syncFantasySeasonPool re-marks a player
 // available automatically once their team_rosters membership is valid again,
 // so this is only meant for a deliberate exclusion (e.g. player left the
