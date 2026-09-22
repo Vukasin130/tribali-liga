@@ -264,21 +264,36 @@ export async function setMatchStatusDb(matchId: string, payload: SetMatchStatusP
 }
 
 // Undoes an accidental "finish" (a real incident: a match barely into its first half got
-// its full-time button tapped by mistake, with no way to continue it afterwards). Only
-// ever a genuine reversal of finishing - it deliberately doesn't accept an arbitrary target
-// status - and restores the exact period the match was actually in when it got finished,
-// not a blank "first_half" restart: it looks up the last kickoff/halftime/second_half
-// event logged before the fulltime one and puts the match back into that period.
-// period_started_at itself was never touched by finishing (setMatchStatusDb only ever
-// forces period, not the clock anchor), so restoring period alone resumes the live clock
-// exactly as if the accidental finish had never happened - no elapsed time is lost.
+// its full-time button tapped by mistake, with no way to continue it afterwards) - but is
+// also the only way to go back and fix/add a stat on a match from a round that's long
+// since ended (a real incident too: an admin needed to correct a wrong Sabac result days
+// after the round finished). Restores the exact period the match was actually in when it
+// got finished, not a blank "first_half" restart: it looks up the last kickoff/halftime/
+// second_half event logged before the fulltime one and puts the match back into that
+// period.
+//
+// The clock anchor (period_started_at) DOES get re-anchored here, deliberately - it used
+// to be left exactly as it was when the match was actually live, on the theory that
+// "resuming" should pick up right where play left off. That's only true moments after an
+// accidental finish; reopened days or weeks later (the Sabac case), the live clock computed
+// as real-time-elapsed-since-that-old-timestamp read as thousands of minutes, which is
+// nonsense for a match nobody is actually replaying - reopening one is for making a
+// correction, not restarting a stopwatch that's been running since the original kickoff.
+// Anchoring instead from the fulltime event's own recorded minute (captured accurately
+// back when the match genuinely finished) reproduces that same, correct minute the instant
+// the match reopens, whether that's 10 seconds or 10 days later - exactly what "the 40th
+// minute" should mean for a match that ended in the 40th minute.
 export async function reopenMatchDb(matchId: string, actor: Actor) {
   await transaction(async (client) => {
-    const current = await client.query("select id, competition_id, status from public.matches where id = $1", [matchId]);
+    const current = await client.query(
+      "select id, competition_id, status, half_length_minutes from public.matches where id = $1",
+      [matchId]
+    );
     if (!current.rows[0]) throw httpError(404, "Utakmica nije pronadjena.");
     if (current.rows[0].status !== "finished") {
       throw httpError(400, "Samo zavrsena utakmica moze da se vrati u toku.");
     }
+    const halfLength = Number(current.rows[0].half_length_minutes || 20);
 
     const lastPeriodEvent = await client.query(
       `select type from public.match_events
@@ -294,14 +309,23 @@ export async function reopenMatchDb(matchId: string, actor: Actor) {
     };
     const restoredPeriod = eventTypeToPeriod[lastPeriodEvent.rows[0]?.type as string] || "first_half";
 
+    const fulltimeEvent = await client.query(
+      `select minute from public.match_events where match_id = $1 and type = 'fulltime' order by created_at desc limit 1`,
+      [matchId]
+    );
+    const finishMinute = Number(fulltimeEvent.rows[0]?.minute ?? halfLength);
+    const elapsedWithinRestoredPeriod =
+      restoredPeriod === "second_half" ? Math.max(0, finishMinute - halfLength) : Math.min(finishMinute, halfLength);
+    const reanchoredStart = new Date(Date.now() - elapsedWithinRestoredPeriod * 60000).toISOString();
+
     // The fulltime event this created is a record of a finish that, as of this call,
     // never really happened - remove it so the timeline doesn't keep a phantom "match
     // ended" entry once play resumes.
     await client.query(`delete from public.match_events where match_id = $1 and type = 'fulltime'`, [matchId]);
 
     await client.query(
-      `update public.matches set status = 'live', period = $2, updated_at = now() where id = $1`,
-      [matchId, restoredPeriod]
+      `update public.matches set status = 'live', period = $2, period_started_at = $3, updated_at = now() where id = $1`,
+      [matchId, restoredPeriod, reanchoredStart]
     );
 
     await recalculateCompetitionStandings(client, current.rows[0].competition_id);

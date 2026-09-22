@@ -398,14 +398,55 @@ describe("reopenMatchDb", () => {
 
       const reopened = await reopenMatchDb(matchId, testActor);
       assert.equal(reopened.status, "live");
-      // The phantom "match ended" entry is gone, and the clock's anchor is untouched -
-      // same kickoff time as before, not reset to 0'.
+      // The phantom "match ended" entry is gone, and the clock's anchor is re-derived from
+      // the fulltime event's own recorded minute (0' here, reopened moments after kickoff) -
+      // not bit-identical to the original anchor (the recorded minute is whole-minute
+      // precision, so up to ~60s of drift is expected), but nowhere near the days/weeks of
+      // drift the old "just leave it" behavior produced once real time actually passed.
       assert.equal(definedEvents(reopened.events).filter((e) => e.type === "fulltime").length, 0);
-      assert.equal(await fetchPeriodStartedAt(matchId), kickoffAnchor);
+      const reanchored = await fetchPeriodStartedAt(matchId);
+      const driftMs = Math.abs(reanchored - kickoffAnchor);
+      assert.ok(driftMs < 65000, `expected the re-anchored clock to stay close to the original kickoff, drifted ${driftMs}ms`);
 
       const standings = await fetchStandings(competitionId);
       const home = standings.find((row) => row.team_id === homeTeamId);
       assert.equal(home?.played, 0, "a reopened match should no longer count in standings");
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  // Real incident: an admin reopened a match from a round that had finished days earlier
+  // to fix a wrong result in Sabac, and the live clock showed "7000 minutes" - the old
+  // period_started_at was still the original kickoff timestamp from days before, and the
+  // clock naively computed real elapsed time since then. Reopening should reproduce the
+  // minute the match actually ended at, however long ago that was.
+  test("reopening a match finished days ago restores a sane minute, not real elapsed time", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(-24 * 7), { status: "live" });
+
+      await setMatchPeriodDb(matchId, { period: "first_half" }, testActor);
+      await setMatchPeriodDb(matchId, { period: "halftime" }, testActor);
+      await setMatchPeriodDb(matchId, { period: "second_half" }, testActor);
+      await setMatchStatusDb(matchId, { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
+
+      // Simulate the match having genuinely finished a week ago at the 37th minute, with
+      // nothing touching period_started_at since (exactly what real history looks like).
+      await query(`update public.match_events set minute = 37 where match_id = $1 and type = 'fulltime'`, [matchId]);
+      await query(`update public.matches set period_started_at = $2 where id = $1`, [matchId, hoursFromNow(-24 * 7).toISOString()]);
+
+      await reopenMatchDb(matchId, testActor);
+      const row = await query<{ period_started_at: Date; half_length_minutes: number }>(
+        "select period_started_at, half_length_minutes from public.matches where id = $1",
+        [matchId]
+      );
+      const elapsedSeconds = (Date.now() - new Date(row.rows[0].period_started_at).getTime()) / 1000;
+      const halfLength = row.rows[0].half_length_minutes;
+      const resumedMinute = halfLength + Math.floor(elapsedSeconds / 60);
+      // 37, not ~10,117 (a week of minutes).
+      assert.ok(resumedMinute >= 37 && resumedMinute < 40, `expected the resumed minute to be about 37, got ${resumedMinute}`);
     } finally {
       await cleanupTestData(tracker);
     }
