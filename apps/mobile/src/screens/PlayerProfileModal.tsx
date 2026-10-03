@@ -16,6 +16,7 @@ import { positionGroupOf } from "../fantasyConstants";
 import { SponsorStrip } from "../components/SponsorStrip";
 import { SponsorSideRail } from "../components/SponsorSideRail";
 import { TeamCrest } from "../components/TeamCrest";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 const POSITION_LABELS: Record<string, string> = { golman: "Golman", odbrana: "Odbrana", napad: "Napad" };
 
@@ -109,7 +110,7 @@ export function PlayerProfileModal({ playerId, onClose }: { playerId: string; on
 
                 {profile.avatarUrl && !photoFailed ? (
                   <Image
-                    source={{ uri: profile.avatarUrl }}
+                    source={{ uri: cloudinaryThumb(profile.avatarUrl, 168) }}
                     style={styles.portraitPhoto}
                     resizeMode="cover"
                     onError={() => setPhotoFailed(true)}

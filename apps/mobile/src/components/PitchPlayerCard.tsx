@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../theme/colors";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 // Matches the reference design's procedurally-drawn kit portraits (a head
 // circle + a colored jersey block per player, no photos) rather than avatar
@@ -95,7 +96,7 @@ export function PitchPlayerCard({
       <View style={styles.cardInner}>
         {avatarUrl && !photoFailed ? (
           <Image
-            source={{ uri: avatarUrl }}
+            source={{ uri: cloudinaryThumb(avatarUrl, Math.max(width, portraitHeight)) }}
             style={[styles.portraitPhoto, { height: portraitHeight }]}
             resizeMode="cover"
             onError={() => setPhotoFailed(true)}

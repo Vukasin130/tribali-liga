@@ -42,6 +42,7 @@ import { SponsorEditorModal } from "./SponsorEditorModal";
 import { LiveMatchesModal } from "./LiveMatchesModal";
 import { useAuth } from "../state/AuthContext";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 // Temporarily off at the user's request (Aug 2026) - the feature and all its code/data
 // stay intact, this is the only switch. Nothing else needs to change to bring it back;
@@ -548,7 +549,7 @@ export function NewsScreen() {
 function StoryLogo({ logoUrl, title }: { logoUrl?: string; title: string }) {
   const [failed, setFailed] = useState(false);
   if (logoUrl && !failed) {
-    return <Image source={{ uri: logoUrl }} style={styles.storyImage} onError={() => setFailed(true)} />;
+    return <Image source={{ uri: cloudinaryThumb(logoUrl, 54) }} style={styles.storyImage} onError={() => setFailed(true)} />;
   }
   return (
     <View style={styles.storyPlaceholder}>
@@ -583,7 +584,7 @@ function SponsorLogo({ logoUrl }: { logoUrl: string }) {
   // changed.
   return (
     <Image
-      source={{ uri: logoUrl }}
+      source={{ uri: cloudinaryThumb(logoUrl, 320) }}
       style={styles.sponsorLogo}
       resizeMode="contain"
       onError={() => setFailed(true)}

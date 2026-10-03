@@ -3,6 +3,7 @@ import { Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View, u
 import { fetchGeneralSponsors } from "../api/endpoints";
 import type { Sponsor } from "../api/types";
 import { colors } from "../theme/colors";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 const RAIL_WIDTH = 160;
 const MIN_CONTENT_WIDTH = 760;
@@ -47,7 +48,7 @@ function RailTile({ sponsor }: { sponsor: Sponsor }) {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
+      <Image source={{ uri: cloudinaryThumb(sponsor.logoUrl, 96) }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }

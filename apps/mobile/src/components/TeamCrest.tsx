@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { kitGradientForTeam } from "./PitchPlayerCard";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -15,7 +16,7 @@ export function TeamCrest({ teamId, name, logoUrl, size = 32 }: { teamId: string
   if (logoUrl && !photoFailed) {
     return (
       <Image
-        source={{ uri: logoUrl }}
+        source={{ uri: cloudinaryThumb(logoUrl, size) }}
         style={[styles.photo, style]}
         resizeMode="cover"
         onError={() => setPhotoFailed(true)}

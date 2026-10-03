@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { colors } from "../theme/colors";
 import { kitGradientForTeam } from "./PitchPlayerCard";
 import { AvailabilityDot } from "./AvailabilityDot";
+import { cloudinaryThumb } from "../utils/cloudinary";
 import type { FantasySeasonPoolPlayer } from "../api/types";
 
 export function PlayerPickerSheet({
@@ -118,7 +119,7 @@ function PickerRow({
         {player.avatarUrl && !photoFailed ? (
           <View style={styles.face}>
             <Image
-              source={{ uri: player.avatarUrl }}
+              source={{ uri: cloudinaryThumb(player.avatarUrl, 42) }}
               style={styles.faceImage}
               resizeMode="cover"
               onError={() => setPhotoFailed(true)}

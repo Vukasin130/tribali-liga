@@ -29,6 +29,7 @@ import { LegalScreen } from "./LegalScreen";
 import { NotificationComposerModal } from "./NotificationComposerModal";
 import { PlayerProfileModal } from "./PlayerProfileModal";
 import { SponsorsManagerModal } from "./SponsorsManagerModal";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
@@ -552,7 +553,7 @@ function VerifiedPlayerCard({
       </View>
 
       {player?.avatarUrl && !photoFailed ? (
-        <Image source={{ uri: player.avatarUrl }} style={styles.verifiedPhoto} resizeMode="cover" onError={onPhotoError} />
+        <Image source={{ uri: cloudinaryThumb(player.avatarUrl, 128) }} style={styles.verifiedPhoto} resizeMode="cover" onError={onPhotoError} />
       ) : (
         <LinearGradient colors={photoGradient} style={styles.verifiedPhotoFallback}>
           <Text style={styles.verifiedPhotoInitials}>{initials(shownName)}</Text>

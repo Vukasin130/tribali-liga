@@ -17,6 +17,7 @@ import { MatchDetailModal } from "./MatchDetailModal";
 import { SponsorStrip } from "../components/SponsorStrip";
 import { SponsorSideRail } from "../components/SponsorSideRail";
 import { TeamCrest } from "../components/TeamCrest";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 type Tab = "profil" | "stats" | "utakmice";
 const TABS: { key: Tab; label: string }[] = [
@@ -41,7 +42,7 @@ function RosterAvatar({ avatarUrl, displayName }: { avatarUrl?: string; displayN
   if (avatarUrl && !failed) {
     return (
       <Image
-        source={{ uri: avatarUrl }}
+        source={{ uri: cloudinaryThumb(avatarUrl, 52) }}
         style={styles.playerAvatar}
         resizeMode="cover"
         onError={() => setFailed(true)}
@@ -151,7 +152,7 @@ export function TeamProfileModal({ teamId, onClose }: { teamId: string; onClose:
 
                 {profile.logoUrl && !photoFailed ? (
                   <Image
-                    source={{ uri: profile.logoUrl }}
+                    source={{ uri: cloudinaryThumb(profile.logoUrl, 168) }}
                     style={styles.crestPhoto}
                     resizeMode="cover"
                     onError={() => setPhotoFailed(true)}

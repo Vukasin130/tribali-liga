@@ -43,6 +43,7 @@ import { AvailabilityDot } from "../components/AvailabilityDot";
 import { BENCH_SLOTS, POSITION_GROUP_LABELS, SLOT_LABELS, SLOT_POSITION, STARTER_SLOTS, positionGroupOf } from "../fantasyConstants";
 import { ManagerTeamModal } from "./ManagerTeamModal";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 const DEFAULT_BUDGET_CAP = 100;
 
@@ -1220,7 +1221,7 @@ function PoolAvatar({ avatarUrl, teamId }: { avatarUrl?: string; teamId: string 
   if (avatarUrl && !failed) {
     return (
       <Image
-        source={{ uri: avatarUrl }}
+        source={{ uri: cloudinaryThumb(avatarUrl, 38) }}
         style={styles.poolFace}
         resizeMode="cover"
         onError={() => setFailed(true)}

@@ -3,6 +3,7 @@ import { Animated, Easing, Image, Linking, StyleSheet, Text, TouchableOpacity, V
 import { fetchGeneralSponsors } from "../api/endpoints";
 import type { Sponsor } from "../api/types";
 import { colors } from "../theme/colors";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 const LOGO_WIDTH = 96;
 const LOGO_HEIGHT = 48;
@@ -74,7 +75,7 @@ function SponsorLogo({ sponsor }: { sponsor: Sponsor }) {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
+      <Image source={{ uri: cloudinaryThumb(sponsor.logoUrl, LOGO_WIDTH) }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }

@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { fetchGeneralSponsors } from "../api/endpoints";
 import type { Sponsor } from "../api/types";
 import { colors } from "../theme/colors";
+import { cloudinaryThumb } from "../utils/cloudinary";
 import { useAuth } from "../state/AuthContext";
 import { SponsorsManagerModal } from "../screens/SponsorsManagerModal";
 
@@ -67,7 +68,7 @@ function SponsorTile({ sponsor }: { sponsor: Sponsor }) {
         if (sponsor.targetUrl) Linking.openURL(sponsor.targetUrl).catch(() => undefined);
       }}
     >
-      <Image source={{ uri: sponsor.logoUrl }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
+      <Image source={{ uri: cloudinaryThumb(sponsor.logoUrl, 64) }} style={styles.logo} resizeMode="cover" onError={() => setFailed(true)} />
     </TouchableOpacity>
   );
 }

@@ -17,6 +17,7 @@ import { SponsorStrip } from "../components/SponsorStrip";
 import { TeamCrest } from "../components/TeamCrest";
 import { useIsWideScreen } from "../hooks/useIsWideScreen";
 import { useAuth } from "../state/AuthContext";
+import { cloudinaryThumb } from "../utils/cloudinary";
 
 type Section = "home" | "players" | "teams" | "stats";
 type StatCategory = "table" | "goals" | "assists" | "saves" | "mvp";
@@ -349,7 +350,7 @@ function PlayerAvatar({ photoUrl, name, size = 56 }: { photoUrl?: string; name: 
   if (photoUrl && !failed) {
     return (
       <Image
-        source={{ uri: photoUrl }}
+        source={{ uri: cloudinaryThumb(photoUrl, size) }}
         style={[styles.searchAvatarPhoto, shape]}
         resizeMode="cover"
         onError={() => setFailed(true)}
