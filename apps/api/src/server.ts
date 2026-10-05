@@ -75,6 +75,7 @@ import {
   setFantasyPoolPlayerPrice,
   releaseAllLockedPrices,
   backfillUnmovedPlayerPrices,
+  recomputeGameweekPoints,
   setFantasySeasonPicks,
   syncFantasySeasonPool,
   updateFantasySeason
@@ -957,6 +958,13 @@ const server = http.createServer(async (req, res) => {
     if (adminFantasySeasonBackfillMatch && req.method === "POST") {
       requireAdmin(sessionUser);
       sendJson(res, 200, { ok: true, data: await backfillUnmovedPlayerPrices(adminFantasySeasonBackfillMatch[1], sessionUser) });
+      return;
+    }
+
+    const adminFantasyGameweekRecomputeMatch = url.pathname.match(/^\/admin\/fantasy-gameweeks\/([^/]+)\/recompute-points$/);
+    if (adminFantasyGameweekRecomputeMatch && req.method === "POST") {
+      requireAdmin(sessionUser);
+      sendJson(res, 200, { ok: true, data: await recomputeGameweekPoints(adminFantasyGameweekRecomputeMatch[1], sessionUser) });
       return;
     }
 

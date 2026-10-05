@@ -1,8 +1,10 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   backfillUnmovedPlayerPrices,
   createFantasySeason,
+  recomputeGameweekPoints,
   releaseAllLockedPrices,
   runFantasyGameweekSweep,
   scoreFantasySeasonGameweek,
@@ -11,7 +13,7 @@ import {
   setFantasySeasonPicks,
   syncFantasySeasonPool
 } from "./fantasy-seasons.ts";
-import { upsertLineupDb } from "./matches-db.ts";
+import { deleteMatchDb, upsertLineupDb } from "./matches-db.ts";
 import { query } from "./db.ts";
 import {
   cleanupTestData,
@@ -792,6 +794,89 @@ describe("backfillUnmovedPlayerPrices", () => {
     } finally {
       await cleanupTestData(tracker);
     }
+  });
+});
+
+// Real incident this exists for: a team was deleted from a league's history entirely
+// (not just cancelled - gone, matches and all) weeks after a round it played in had
+// already been scored - every pick that scored off a now-deleted match's stats was left
+// holding points for a match that, as far as the record is concerned, never happened.
+describe("recomputeGameweekPoints", () => {
+  test("zeroes out a pick's points once its match is deleted, without touching price", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const home = await createTestTeam(tracker, competitionId, "__test__ home");
+      const away = await createTestTeam(tracker, competitionId, "__test__ away");
+      const scorer = await createTestPlayer(tracker, home, "__test__ scorer");
+
+      const matchId = await createTestMatch(tracker, competitionId, home, away, daysFromNow(-10), { status: "finished" });
+      await createTestPlayerMatchStats(matchId, home, scorer, { fantasyPoints: 9 });
+
+      const seasonId = await createTestFantasySeason(tracker, [competitionId]);
+      await syncFantasySeasonPool(seasonId, testActor);
+      await setFantasyPoolPlayerPrice(seasonId, scorer, { price: 5, isPriceLocked: false }, testActor);
+
+      const gameweekId = await createTestGameweek(tracker, seasonId, {
+        startsAt: daysFromNow(-11),
+        locksAt: daysFromNow(-10),
+        endsAt: daysFromNow(-9)
+      });
+      await scoreFantasySeasonGameweek(gameweekId, testActor);
+
+      const userId = await createTestUser(tracker, "__test__ manager");
+      // A real save would have gone through setFantasySeasonPicks before the round locked -
+      // scoreFantasySeasonGameweek has already run above, so this inserts the pick and its
+      // already-scored points directly, exactly mirroring what "a real squad, already
+      // scored, weeks ago" looks like in the table (cleaned up via the season's cascade).
+      const teamRow = await query<{ id: string }>(
+        `insert into public.fantasy_teams (fantasy_season_id, user_id, name, budget_cap) values ($1,$2,$3,100) returning id`,
+        [seasonId, userId, "__test__ manager tim"]
+      );
+      await query(
+        `insert into public.fantasy_team_picks (fantasy_team_id, player_id, fantasy_gameweek_id, slot, is_captain, points)
+         values ($1,$2,$3,'ATT1',false,9)`,
+        [teamRow.rows[0].id, scorer, gameweekId]
+      );
+      await query(`update public.fantasy_teams set total_points = 9 where id = $1`, [teamRow.rows[0].id]);
+
+      const priceBefore = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, scorer]
+      );
+
+      await deleteMatchDb(matchId, testActor);
+      const result = await recomputeGameweekPoints(gameweekId, testActor);
+      assert.equal(result.updatedPicks, 1);
+
+      const pick = await query<{ points: number }>(`select points from public.fantasy_team_picks where fantasy_team_id = $1`, [
+        teamRow.rows[0].id
+      ]);
+      assert.equal(pick.rows[0].points, 0);
+
+      const team = await query<{ total_points: number }>(`select total_points from public.fantasy_teams where id = $1`, [
+        teamRow.rows[0].id
+      ]);
+      assert.equal(team.rows[0].total_points, 0);
+
+      const priceAfter = await query<{ current_price: string }>(
+        `select current_price from public.fantasy_player_pool where fantasy_season_id = $1 and player_id = $2`,
+        [seasonId, scorer]
+      );
+      assert.equal(priceAfter.rows[0]?.current_price, priceBefore.rows[0]?.current_price);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects a gameweek id that does not exist", async () => {
+    await assert.rejects(
+      () => recomputeGameweekPoints(randomUUID(), testActor),
+      (error: any) => {
+        assert.equal(error.statusCode, 404);
+        return true;
+      }
+    );
   });
 });
 

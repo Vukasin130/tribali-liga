@@ -1248,6 +1248,78 @@ export async function scoreFantasySeasonGameweek(fantasyGameweekId: string, acto
   return result;
 }
 
+// scoreFantasySeasonGameweek can't just be re-run on an already-finished gameweek to pick
+// up a correction (a deleted match, a fixed stat) - it would also re-trigger price movement
+// against whatever the price already is, double-shifting it on top of the original run.
+// This re-derives only the points side, the exact same gw_points/pick_scores formula
+// scoreFantasySeasonGameweek uses, straight from whatever player_match_stats currently
+// says - so once a match (and its stats) is deleted, re-running this against the gameweeks
+// it fell in corrects every affected pick's points without touching a single price.
+export async function recomputeGameweekPoints(fantasyGameweekId: string, actor: Actor | null): Promise<{ updatedPicks: number }> {
+  const result = await transaction(async (client) => {
+    const gwResult = await client.query("select * from public.fantasy_gameweeks where id = $1 for update", [fantasyGameweekId]);
+    const gameweek = gwResult.rows[0];
+    if (!gameweek) throw httpError(404, "Fantasy kolo nije pronadjeno.");
+    const seasonId = gameweek.fantasy_season_id;
+    const windowEnd = gameweek.ends_at || gameweek.locks_at;
+
+    const scoreRows = await client.query(
+      `with season_competitions as (
+         select competition_id from public.fantasy_season_competitions where fantasy_season_id = $1
+       ),
+       gw_points as (
+         select pms.player_id, sum(pms.fantasy_points) as points
+         from public.player_match_stats pms
+         join public.matches m on m.id = pms.match_id
+         where m.competition_id in (select competition_id from season_competitions)
+           and m.scheduled_at >= $2::timestamptz and m.scheduled_at <= $3::timestamptz
+           and m.status = 'finished'
+         group by pms.player_id
+       ),
+       pick_scores as (
+         select ftp.id as pick_id,
+                round(
+                  coalesce(gwp.points, 0)
+                  * case
+                      when ftp.slot in ('B2','B3','B4','B5') then 0.5
+                      else 1
+                    end
+                  * case when ftp.is_captain then 2 else 1 end
+                )::integer as points
+         from public.fantasy_team_picks ftp
+         left join gw_points gwp on gwp.player_id = ftp.player_id
+         where ftp.fantasy_gameweek_id = $4
+       )
+       update public.fantasy_team_picks ftp
+       set points = pick_scores.points, updated_at = now()
+       from pick_scores
+       where ftp.id = pick_scores.pick_id and ftp.points is distinct from pick_scores.points
+       returning ftp.fantasy_team_id`,
+      [seasonId, gameweek.starts_at, windowEnd, fantasyGameweekId]
+    );
+
+    await client.query(
+      `with totals as (
+         select fantasy_team_id, sum(points)::integer as total
+         from public.fantasy_team_picks
+         where fantasy_gameweek_id is not null
+         group by fantasy_team_id
+       )
+       update public.fantasy_teams ft
+       set total_points = totals.total, updated_at = now()
+       from totals
+       where ft.id = totals.fantasy_team_id and ft.total_points is distinct from totals.total`
+    );
+
+    return { updatedPicks: scoreRows.rowCount || 0 };
+  });
+
+  await audit(actor, "fantasy.season.gameweek.recompute-points", "fantasyGameweek", fantasyGameweekId, {
+    updatedPicks: result.updatedPicks
+  });
+  return result;
+}
+
 export async function getFantasySeasonLeaderboard(seasonId: string, fantasyGameweekId?: string) {
   const params: unknown[] = [requiredText(seasonId, "Sezona je obavezna.")];
   let scoreSql = "ft.total_points";
