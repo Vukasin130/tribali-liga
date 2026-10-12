@@ -55,11 +55,7 @@ export function deleteAccount(password: string) {
 
 export interface UploadTarget {
   uploadUrl: string;
-  apiKey: string;
-  timestamp: number;
-  signature: string;
-  publicId: string;
-  resourceType: "image" | "video";
+  publicUrl: string;
   contentType: string;
   maxSizeBytes: number;
 }

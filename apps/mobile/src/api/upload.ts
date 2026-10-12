@@ -1,4 +1,3 @@
-import { Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { createUploadTarget } from "./endpoints";
 
@@ -26,31 +25,21 @@ export async function pickAndUploadMedia(purpose: "story" | "news" | "goal" | "l
 
   const target = await createUploadTarget({ purpose, contentType, sizeBytes: asset.fileSize || 1 });
 
-  const form = new FormData();
-  const fileName = `upload.${contentType.split("/")[1] || "jpg"}`;
-  if (Platform.OS === "web") {
-    // On web, asset.uri is a blob: URL and the browser's real FormData needs an
-    // actual Blob/File - it silently stringifies a {uri,name,type} object instead
-    // of rejecting it, so the bug only ever shows up server-side as a bogus source.
-    const localFile = await fetch(asset.uri);
-    const blob = await localFile.blob();
-    form.append("file", blob, fileName);
-  } else {
-    // Native's fetch/FormData polyfill accepts this {uri, name, type} shape directly -
-    // no need to fetch()+blob() the local file first like the web branch above does.
-    form.append("file", { uri: asset.uri, name: fileName, type: contentType } as unknown as Blob);
-  }
-  form.append("api_key", target.apiKey);
-  form.append("timestamp", String(target.timestamp));
-  form.append("signature", target.signature);
-  form.append("public_id", target.publicId);
+  // Read the local file (works for both a web blob: URL and a native file:// / content://
+  // URI) into a Blob, then PUT it straight to the presigned R2 URL - a plain binary PUT,
+  // not multipart form data, since R2 (unlike Cloudinary's upload API) takes the raw body.
+  const localFile = await fetch(asset.uri);
+  const blob = await localFile.blob();
 
-  const uploadResponse = await fetch(target.uploadUrl, { method: "POST", body: form });
-  const data = await uploadResponse.json().catch(() => null);
+  const uploadResponse = await fetch(target.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": target.contentType },
+    body: blob
+  });
 
-  if (!uploadResponse.ok || !data?.secure_url) {
-    throw new Error(data?.error?.message || `Upload nije uspeo (${uploadResponse.status})`);
+  if (!uploadResponse.ok) {
+    throw new Error(`Upload nije uspeo (${uploadResponse.status})`);
   }
 
-  return { url: data.secure_url as string, mediaType };
+  return { url: target.publicUrl, mediaType };
 }

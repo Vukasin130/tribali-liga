@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
-import { v2 as cloudinary } from "cloudinary";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "./config.ts";
 import { httpError } from "./errors.ts";
 import type { Actor } from "./types.ts";
 
-cloudinary.config({
-  cloud_name: config.cloudinary.cloudName,
-  api_key: config.cloudinary.apiKey,
-  api_secret: config.cloudinary.apiSecret
+// Cloudflare R2 speaks the S3 API - "auto" region and the account-specific endpoint are
+// R2's own convention, everything else is the standard AWS S3 client. Unlike Cloudinary,
+// R2 charges nothing for bandwidth no matter how many times an image is viewed, which is
+// exactly the problem this replaces: Cloudinary's free tier got disabled after real
+// traffic (not file count - 1MB logos viewed thousands of times) blew past its bandwidth
+// quota. R2's free tier has no bandwidth dimension to exceed in the first place.
+const r2 = new S3Client({
+  region: "auto",
+  endpoint: `https://${config.r2.accountId}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: config.r2.accessKeyId,
+    secretAccessKey: config.r2.secretAccessKey
+  }
 });
 
 // "logo"/"avatar" behave like the old team-logos bucket (small, image-only, 5MB cap);
@@ -27,6 +37,7 @@ const ALLOWED_MIME = new Set([
 
 const MAX_SMALL_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_MEDIA_BYTES = 100 * 1024 * 1024;
+const SIGNED_URL_TTL_SECONDS = 5 * 60;
 
 interface CreateUploadTargetPayload {
   purpose?: string;
@@ -38,18 +49,14 @@ interface CreateUploadTargetPayload {
 
 export interface UploadTarget {
   uploadUrl: string;
-  apiKey: string;
-  timestamp: number;
-  signature: string;
-  publicId: string;
-  resourceType: "image" | "video";
+  publicUrl: string;
   contentType: string;
   maxSizeBytes: number;
 }
 
-// Signed direct-upload: the phone uploads the file bytes straight to Cloudinary, never
-// through our API - we only hand out a short-lived signature computed with the secret
-// key (which never leaves the server) authorizing this one specific upload.
+// Signed direct-upload: the phone PUTs the file bytes straight to R2, never through our
+// API - we only hand out a short-lived presigned URL (computed with the secret key, which
+// never leaves the server) authorizing this one specific upload.
 export async function createUploadTarget(payload: CreateUploadTargetPayload, actor: Actor | null): Promise<UploadTarget> {
   if (!actor?.id) throw httpError(401, "Moras biti ulogovan.");
   const purpose = String(payload.purpose || "story").trim();
@@ -67,19 +74,16 @@ export async function createUploadTarget(payload: CreateUploadTargetPayload, act
     throw httpError(413, isSmallImage ? "Logo moze imati najvise 5 MB." : "Video/slika moze imati najvise 100 MB.");
   }
 
-  const resourceType: "image" | "video" = contentType.startsWith("video/") ? "video" : "image";
-  const publicId = `${purpose}/${actor.id}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}`;
-  const timestamp = Math.round(Date.now() / 1000);
-  const paramsToSign = { timestamp, public_id: publicId };
-  const signature = cloudinary.utils.api_sign_request(paramsToSign, config.cloudinary.apiSecret);
+  const key = `${purpose}/${actor.id}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}`;
+  const uploadUrl = await getSignedUrl(
+    r2,
+    new PutObjectCommand({ Bucket: config.r2.bucketName, Key: key, ContentType: contentType }),
+    { expiresIn: SIGNED_URL_TTL_SECONDS }
+  );
 
   return {
-    uploadUrl: `https://api.cloudinary.com/v1_1/${config.cloudinary.cloudName}/${resourceType}/upload`,
-    apiKey: config.cloudinary.apiKey,
-    timestamp,
-    signature,
-    publicId,
-    resourceType,
+    uploadUrl,
+    publicUrl: `${config.r2.publicUrl}/${key}`,
     contentType,
     maxSizeBytes
   };

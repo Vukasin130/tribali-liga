@@ -31,6 +31,15 @@ export const config = {
     apiKey: process.env.CLOUDINARY_API_KEY || "",
     apiSecret: process.env.CLOUDINARY_API_SECRET || ""
   },
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID || "",
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+    bucketName: process.env.R2_BUCKET_NAME || "",
+    // The bucket's public r2.dev (or custom domain) base URL - images are served
+    // straight from here, same as a Cloudinary delivery URL. No trailing slash.
+    publicUrl: (process.env.R2_PUBLIC_URL || "").replace(/\/+$/, "")
+  },
   auth: {
     adminEmail: (process.env.ADMIN_EMAIL || "admin@urbanfantasy.rs").toLowerCase(),
     adminPassword: process.env.ADMIN_PASSWORD || ""
