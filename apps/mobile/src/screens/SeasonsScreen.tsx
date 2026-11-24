@@ -359,22 +359,26 @@ export function SeasonsScreen() {
                   </View>
                 ) : null}
               </>
-            ) : knockoutMatches.length > 0 ? (
-              <View style={styles.section}>
-                <SectionTitle title="Nokaut faza" />
-                <KnockoutBracket matches={knockoutMatches} onOpenMatch={setActiveMatchId} onOpenTeam={setActiveTeamId} />
-              </View>
             ) : (
-              <View style={styles.section}>
-                {(hub?.standings ?? []).length === 0 ? <EmptyState message="Tabela jos nije dostupna." /> : null}
-                <View style={isWide ? styles.standingsGrid : undefined}>
-                  {(hub?.standings ?? []).map((group) => (
-                    <View key={group.name} style={isWide ? styles.standingsGridItem : undefined}>
-                      <StandingsTable groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
-                    </View>
-                  ))}
+              <>
+                {knockoutMatches.length > 0 ? (
+                  <View style={styles.section}>
+                    <SectionTitle title="Nokaut faza" />
+                    <KnockoutBracket matches={knockoutMatches} onOpenMatch={setActiveMatchId} onOpenTeam={setActiveTeamId} />
+                  </View>
+                ) : null}
+                <View style={styles.section}>
+                  {knockoutMatches.length > 0 ? <SectionTitle title="Regularni deo" /> : null}
+                  {(hub?.standings ?? []).length === 0 ? <EmptyState message="Tabela jos nije dostupna." /> : null}
+                  <View style={isWide ? styles.standingsGrid : undefined}>
+                    {(hub?.standings ?? []).map((group) => (
+                      <View key={group.name} style={isWide ? styles.standingsGridItem : undefined}>
+                        <StandingsTable groupName={group.name} rows={group.rows} onTeamPress={setActiveTeamId} />
+                      </View>
+                    ))}
+                  </View>
                 </View>
-              </View>
+              </>
             )}
 
             <View style={styles.section}>
