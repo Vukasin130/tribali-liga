@@ -390,9 +390,24 @@ interface UpdateMatchPayload {
   status?: string;
   sponsorId?: string;
   halfLengthMinutes?: number;
+  homeTeamId?: string;
+  awayTeamId?: string;
 }
 
 export async function updateMatchDb(matchId: string, payload: UpdateMatchPayload, actor: Actor) {
+  // Swapping the actual opponent in an existing fixture (a manual bracket override - e.g.
+  // the admin deciding a different team should have qualified) is only ever safe before
+  // anything has really happened: once a match is live or finished, home_team_id/
+  // away_team_id are baked into every event, stat and standings row already generated from
+  // it, and silently reassigning the teams at that point would misattribute all of it.
+  if (payload.homeTeamId !== undefined || payload.awayTeamId !== undefined) {
+    const current = await query<{ status: string }>("select status from public.matches where id = $1", [matchId]);
+    if (!current.rows[0]) throw httpError(404, "Utakmica nije pronadjena.");
+    if (current.rows[0].status !== "scheduled") {
+      throw httpError(400, "Ekipe mozes promeniti samo dok je mec jos zakazan, pre nego sto pocne.");
+    }
+  }
+
   const result = await query(
     `update public.matches set
        scheduled_at = coalesce($2, scheduled_at),
@@ -401,6 +416,8 @@ export async function updateMatchDb(matchId: string, payload: UpdateMatchPayload
        status = coalesce($5, status),
        sponsor_id = case when $6 then $7::uuid else sponsor_id end,
        half_length_minutes = coalesce($8, half_length_minutes),
+       home_team_id = coalesce($9::uuid, home_team_id),
+       away_team_id = coalesce($10::uuid, away_team_id),
        updated_at = now()
      where id = $1
      returning id, competition_id, scheduled_at`,
@@ -412,7 +429,9 @@ export async function updateMatchDb(matchId: string, payload: UpdateMatchPayload
       payload.status !== undefined ? validStatus(payload.status) : null,
       payload.sponsorId !== undefined,
       payload.sponsorId || null,
-      payload.halfLengthMinutes !== undefined ? toNumber(payload.halfLengthMinutes) : null
+      payload.halfLengthMinutes !== undefined ? toNumber(payload.halfLengthMinutes) : null,
+      payload.homeTeamId || null,
+      payload.awayTeamId || null
     ]
   );
   if (!result.rows[0]) throw httpError(404, "Utakmica nije pronadjena.");

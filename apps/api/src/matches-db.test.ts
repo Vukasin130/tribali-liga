@@ -380,6 +380,45 @@ describe("setMatchStatusDb", () => {
   });
 });
 
+// Real incident this exists for: an admin needed to manually swap who a team plays in a
+// knockout fixture (e.g. deciding a different team should have qualified than the one the
+// bracket picked), not just reschedule the same two teams' kickoff time.
+describe("updateMatchDb - swapping the teams", () => {
+  test("replaces a scheduled match's opponent", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const newOpponent = await createTestTeam(tracker, competitionId, "__test__ new opponent");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0));
+
+      const updated = await updateMatchDb(matchId, { awayTeamId: newOpponent }, testActor);
+      assert.equal(updated.awayTeamId, newOpponent);
+      assert.equal(updated.homeTeamId, homeTeamId);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects swapping teams once the match is no longer just scheduled", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, homeTeamId, awayTeamId } = await setup2v2(tracker);
+      const newOpponent = await createTestTeam(tracker, competitionId, "__test__ new opponent");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, hoursFromNow(0), { status: "live" });
+
+      await assert.rejects(
+        () => updateMatchDb(matchId, { awayTeamId: newOpponent }, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
 describe("reopenMatchDb", () => {
   // The real incident this exists for: an admin's finger slipped and finished a match
   // that had barely kicked off, with previously no way to undo it - the match was
