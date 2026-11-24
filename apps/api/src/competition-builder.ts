@@ -67,7 +67,7 @@ export async function getCompetitionSetup(competitionId: string) {
        left join public.teams ht on ht.id = m.home_team_id
        left join public.teams at on at.id = m.away_team_id
        left join public.competition_phases cp on cp.id = m.phase_id
-       where m.competition_id = $1
+        where m.competition_id = $1
        order by m.scheduled_at, m.round, ht.name`,
       [competitionId]
     )
@@ -868,6 +868,7 @@ export async function prepareKnockoutPhase(competitionId: string, payload: any, 
     const phase = await getPhaseByCode(client, competitionId, phaseCode);
     const qualifiers = await selectQualifiers(client, competitionId, qualifiersCount);
     if (qualifiers.length < 2) throw httpError(400, "Nema dovoljno ekipa za nokaut fazu.");
+    const regularSeasonMaxRound = await getRegularSeasonMaxRound(client, competitionId);
 
     await client.query(
       `delete from public.matches
@@ -876,6 +877,7 @@ export async function prepareKnockoutPhase(competitionId: string, payload: any, 
     );
 
     const firstRound = pairSeeds(qualifiers);
+    const firstRoundNumber = knockoutRoundNumber(qualifiers.length, regularSeasonMaxRound);
     const slotsNeeded = firstRound.length + (includeThirdPlace ? 1 : 0);
     const slots = await loadUsableSlots(client, competitionId, slotsNeeded, startAt, intervalMinutes, venue);
     const matches = [];
@@ -887,19 +889,23 @@ export async function prepareKnockoutPhase(competitionId: string, payload: any, 
            (competition_id, phase_id, home_team_id, away_team_id, phase, round, scheduled_at, venue, status)
          values ($1, $2, $3, $4, 'knockout', $5, $6, $7, 'scheduled')
          returning *`,
-        [competitionId, phase.id, home.team_id, away.team_id, knockoutRoundNumber(qualifiers.length), slots[index].startsAt, slots[index].venue || venue]
+        [competitionId, phase.id, home.team_id, away.team_id, firstRoundNumber, slots[index].startsAt, slots[index].venue || venue]
       );
       matches.push(saved.rows[0]);
     }
 
+    // A preparation call starting directly at 2 qualifiers (no earlier knockout rounds at
+    // all) means this round IS the final - the third-place match belongs at that same
+    // stage, not the "final" stage number of some fixed legacy scheme.
     if (includeThirdPlace) {
       const slot = slots[firstRound.length];
+      const thirdPlaceRound = knockoutRoundNumber(2, regularSeasonMaxRound);
       const third = await client.query(
         `insert into public.matches
            (competition_id, phase_id, phase, round, scheduled_at, venue, status)
-         values ($1, $2, 'third_place', 3, $3, $4, 'scheduled')
+         values ($1, $2, 'third_place', $3, $4, $5, 'scheduled')
          returning *`,
-        [competitionId, phase.id, slot.startsAt, slot.venue || venue]
+        [competitionId, phase.id, thirdPlaceRound, slot.startsAt, slot.venue || venue]
       );
       matches.push(third.rows[0]);
     }
@@ -927,9 +933,14 @@ export async function advanceKnockoutPhase(competitionId: string, payload: any, 
 
   const result = await transaction(async (client) => {
     const phase = await getPhaseByCode(client, competitionId, phaseCode);
+    const regularSeasonMaxRound = await getRegularSeasonMaxRound(client, competitionId);
 
+    // Round numbers now count UP as the bracket shrinks (see knockoutRoundNumber), so the
+    // round currently being played is always the HIGHEST knockout round number that
+    // exists, not the lowest - a finished round-of-8 (an earlier, lower number) must never
+    // be picked back up as "current" once a round-of-4 has been prepared from its winners.
     const currentRoundResult = await client.query(
-      `select min(round) as round
+      `select max(round) as round
        from public.matches
        where competition_id = $1 and phase_id = $2 and phase = 'knockout'`,
       [competitionId, phase.id]
@@ -943,7 +954,9 @@ export async function advanceKnockoutPhase(competitionId: string, payload: any, 
        order by created_at`,
       [competitionId, phase.id, currentRound]
     );
-    if (currentMatches.rows.length < 2 && currentRound > 2) {
+    // A final is exactly one match - only a genuinely empty round (nothing to advance from
+    // at all) is the real error case, not "fewer than 2".
+    if (currentMatches.rows.length === 0) {
       throw httpError(400, "Trenutna nokaut runda nema dovoljno mečeva.");
     }
     if (currentMatches.rows.some((match) => match.status !== "finished")) {
@@ -974,7 +987,7 @@ export async function advanceKnockoutPhase(competitionId: string, payload: any, 
       return { champion, matches: [] };
     }
 
-    const nextRound = knockoutRoundNumber(winners.length);
+    const nextRound = knockoutRoundNumber(winners.length, regularSeasonMaxRound);
     await client.query(
       `delete from public.matches
        where competition_id = $1 and phase_id = $2 and phase = 'knockout' and round = $3 and status = 'scheduled'`,
@@ -1001,7 +1014,7 @@ export async function advanceKnockoutPhase(competitionId: string, payload: any, 
       matches.push(saved.rows[0]);
     }
 
-    if (includeThirdPlace && nextRound === 2) {
+    if (includeThirdPlace && winners.length === 2) {
       const losers = currentMatches.rows
         .map((match) => {
           const homeScore = Number(match.home_score || 0);
@@ -1011,12 +1024,13 @@ export async function advanceKnockoutPhase(competitionId: string, payload: any, 
         .filter(Boolean);
       if (losers.length === 2) {
         const slot = await loadUsableSlots(client, competitionId, 1, startAt, intervalMinutes, venue);
+        const thirdPlaceRound = knockoutRoundNumber(2, regularSeasonMaxRound);
         const third = await client.query(
           `insert into public.matches
              (competition_id, phase_id, home_team_id, away_team_id, phase, round, scheduled_at, venue, status)
-           values ($1, $2, $3, $4, 'third_place', 3, $5, $6, 'scheduled')
+           values ($1, $2, $3, $4, 'third_place', $5, $6, $7, 'scheduled')
            returning *`,
-          [competitionId, phase.id, losers[0], losers[1], slot[0].startsAt, slot[0].venue || venue]
+          [competitionId, phase.id, losers[0], losers[1], thirdPlaceRound, slot[0].startsAt, slot[0].venue || venue]
         );
         matches.push(third.rows[0]);
       }
@@ -1225,11 +1239,26 @@ function pairSeeds(qualifiers: any[]) {
   return pairs;
 }
 
-function knockoutRoundNumber(count: number): number {
-  if (count >= 16) return 16;
-  if (count >= 8) return 8;
-  if (count >= 4) return 4;
-  return 2;
+// Used to be a bare bracket-size number (16/8/4/2) with no idea what round the regular
+// season itself had reached - for any league whose regular season ran 8+ rounds (completely
+// normal), the very first knockout round silently landed on the SAME round number as an
+// already-played regular-season round, and because the numbers also *decreased* as the
+// bracket progressed (quarterfinal 8 -> final 2), the final would sort before the
+// semifinal in any round-ordered view. Both bugs are fixed by the same change: anchor every
+// knockout round to right after the regular season's own highest round, and count UP as the
+// bracket shrinks (round of 16 first, then 8, then 4, then the final) instead of down.
+const KNOCKOUT_STAGE_OFFSET: Record<number, number> = { 16: 1, 8: 2, 4: 3, 2: 4 };
+function knockoutRoundNumber(remainingTeams: number, regularSeasonMaxRound: number): number {
+  return regularSeasonMaxRound + (KNOCKOUT_STAGE_OFFSET[remainingTeams] ?? 5);
+}
+
+async function getRegularSeasonMaxRound(client: PoolClient, competitionId: string): Promise<number> {
+  const result = await client.query(
+    `select coalesce(max(round), 0) as max_round from public.matches
+     where competition_id = $1 and phase not in ('knockout', 'third_place')`,
+    [competitionId]
+  );
+  return Number(result.rows[0]?.max_round || 0);
 }
 
 function buildGroupNames(count: number): string[] {

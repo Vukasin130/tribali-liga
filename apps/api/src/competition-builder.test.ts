@@ -1,8 +1,16 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { addReturnLeg, configureCompetition, generateCompetitionSchedule, resumeCompetitionSchedule } from "./competition-builder.ts";
-import { query } from "./db.ts";
-import { cleanupTestData, closePool, createTestCompetition, createTestTeam, newFixtureTracker } from "./test-helpers.ts";
+import {
+  addReturnLeg,
+  advanceKnockoutPhase,
+  configureCompetition,
+  generateCompetitionSchedule,
+  prepareKnockoutPhase,
+  resumeCompetitionSchedule
+} from "./competition-builder.ts";
+import { query, transaction } from "./db.ts";
+import { recalculateCompetitionStandings, setMatchStatusDb } from "./matches-db.ts";
+import { cleanupTestData, closePool, createTestCompetition, createTestMatch, createTestTeam, newFixtureTracker } from "./test-helpers.ts";
 import type { Actor } from "./types.ts";
 
 // audit_logs.actor_user_id has a real FK to profiles - see fantasy-seasons.test.ts for
@@ -239,6 +247,188 @@ describe("addReturnLeg", () => {
 
       await assert.rejects(
         () => addReturnLeg(competitionId, { phaseCode: "regular" }, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+// Real incident: a league whose regular season ran into double-digit rounds (completely
+// normal for anything but a tiny bracket) got its first knockout round silently assigned
+// the SAME round number as an already-played, already-finished regular-season round - the
+// two finished up mixed together under one "Kolo N" in every round-grouped view, so the
+// admin's brand new knockout fixtures looked like they'd never been created at all.
+describe("prepareKnockoutPhase", () => {
+  async function setupLeagueWithKnockoutPhase(tracker: ReturnType<typeof newFixtureTracker>, teamCount: number) {
+    const competitionId = await createTestCompetition(tracker);
+    await configureCompetition(
+      competitionId,
+      {
+        formatType: "league",
+        phases: [
+          { code: "regular", name: "Regularni deo", type: "league", sequence: 1, legs: 1 },
+          { code: "knockout", name: "Nokaut faza", type: "knockout", sequence: 2, legs: 1 }
+        ]
+      },
+      testActor
+    );
+    const teamIds: string[] = [];
+    for (let i = 0; i < teamCount; i += 1) {
+      teamIds.push(await createTestTeam(tracker, competitionId, `__test__ team${i}`));
+    }
+    return { competitionId, teamIds };
+  }
+
+  test("anchors the first knockout round after the regular season's own highest round, not a fixed bracket-size number", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, teamIds } = await setupLeagueWithKnockoutPhase(tracker, 4);
+
+      // A regular season that ran to round 9 - well past the old fixed "8" the first
+      // knockout round used to get assigned, which is exactly how the two collided.
+      const matchId = await createTestMatch(tracker, competitionId, teamIds[0], teamIds[1], new Date(), {
+        status: "finished",
+        homeScore: 2,
+        awayScore: 1
+      });
+      await query("update public.matches set round = 9 where id = $1", [matchId]);
+      await transaction((client) => recalculateCompetitionStandings(client, competitionId));
+
+      const result = await prepareKnockoutPhase(
+        competitionId,
+        { phaseCode: "knockout", qualifiersCount: 4, includeThirdPlace: false },
+        testActor
+      );
+      assert.equal(result.matches.length, 2);
+      for (const match of result.matches) {
+        assert.ok(match.round > 9, `expected the knockout round (${match.round}) to come after round 9`);
+      }
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects when fewer than 2 teams qualify", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId } = await setupLeagueWithKnockoutPhase(tracker, 1);
+      await transaction((client) => recalculateCompetitionStandings(client, competitionId));
+
+      await assert.rejects(
+        () => prepareKnockoutPhase(competitionId, { phaseCode: "knockout", qualifiersCount: 4 }, testActor),
+        (error: any) => {
+          assert.equal(error.statusCode, 400);
+          return true;
+        }
+      );
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+describe("advanceKnockoutPhase", () => {
+  async function setupKnockoutInProgress(tracker: ReturnType<typeof newFixtureTracker>) {
+    const competitionId = await createTestCompetition(tracker);
+    await configureCompetition(
+      competitionId,
+      {
+        formatType: "league",
+        phases: [
+          { code: "regular", name: "Regularni deo", type: "league", sequence: 1, legs: 1 },
+          { code: "knockout", name: "Nokaut faza", type: "knockout", sequence: 2, legs: 1 }
+        ]
+      },
+      testActor
+    );
+    const teamIds: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      teamIds.push(await createTestTeam(tracker, competitionId, `__test__ team${i}`));
+    }
+    const matchId = await createTestMatch(tracker, competitionId, teamIds[0], teamIds[1], new Date(), {
+      status: "finished",
+      homeScore: 2,
+      awayScore: 1
+    });
+    await query("update public.matches set round = 9 where id = $1", [matchId]);
+    await transaction((client) => recalculateCompetitionStandings(client, competitionId));
+    await prepareKnockoutPhase(competitionId, { phaseCode: "knockout", qualifiersCount: 4 }, testActor);
+    return { competitionId, teamIds };
+  }
+
+  test("the next round's number is higher than the one it came from, not lower", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId } = await setupKnockoutInProgress(tracker);
+      const firstRound = await query<{ id: string; round: number }>(
+        "select id, round from public.matches where competition_id = $1 and phase = 'knockout'",
+        [competitionId]
+      );
+      const firstRoundNumber = firstRound.rows[0].round;
+      for (const match of firstRound.rows) {
+        await setMatchStatusDb(match.id, { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
+      }
+
+      const result = await advanceKnockoutPhase(competitionId, { phaseCode: "knockout" }, testActor);
+      assert.equal(result.matches.length, 1);
+      assert.ok(
+        result.matches[0].round > firstRoundNumber,
+        `expected the final (${result.matches[0].round}) to come after the first round (${firstRoundNumber})`
+      );
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("declares a champion once only one winner remains", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId } = await setupKnockoutInProgress(tracker);
+      const firstRound = await query<{ id: string }>(
+        "select id from public.matches where competition_id = $1 and phase = 'knockout'",
+        [competitionId]
+      );
+      for (const match of firstRound.rows) {
+        await setMatchStatusDb(match.id, { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
+      }
+      await advanceKnockoutPhase(competitionId, { phaseCode: "knockout" }, testActor);
+
+      const finalMatch = await query<{ id: string }>(
+        `select id from public.matches where competition_id = $1 and phase = 'knockout'
+         order by round desc limit 1`,
+        [competitionId]
+      );
+      await setMatchStatusDb(finalMatch.rows[0].id, { status: "finished", homeScore: 3, awayScore: 1 }, testActor);
+
+      const result = await advanceKnockoutPhase(competitionId, { phaseCode: "knockout" }, testActor);
+      assert.ok(result.champion, "expected a champion to be declared");
+      assert.equal(result.matches.length, 0);
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("rejects advancing before the current round's matches are finished", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId } = await setupKnockoutInProgress(tracker);
+      await assert.rejects(
+        () => advanceKnockoutPhase(competitionId, { phaseCode: "knockout" }, testActor),
         (error: any) => {
           assert.equal(error.statusCode, 400);
           return true;
