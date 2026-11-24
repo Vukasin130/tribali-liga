@@ -1051,6 +1051,26 @@ export async function advanceKnockoutPhase(competitionId: string, payload: any, 
   };
 }
 
+// Called right after any match finishes (see server.ts) - a plain no-op for the vast
+// majority of matches (regular league games), and for a knockout match it tries to move
+// the bracket forward on its own instead of leaving the admin to notice the round is done
+// and tap "Sledeca nokaut runda" manually. Most of the time this call fails harmlessly with
+// "round not complete yet" (other matches in it are still pending) - that failure is the
+// normal, expected outcome for every match except the one that finishes a round, not a bug
+// to surface. includeThirdPlace is always on here (unlike the admin's own manual advance
+// call) since there's no one left to ask once this is automatic.
+export async function maybeAutoAdvanceKnockout(
+  match: { phase?: string; status?: string; competitionId?: string },
+  actor: Actor
+): Promise<void> {
+  if (match.phase !== "knockout" || match.status !== "finished" || !match.competitionId) return;
+  try {
+    await advanceKnockoutPhase(match.competitionId, { includeThirdPlace: true }, actor);
+  } catch {
+    // Expected most of the time - see comment above.
+  }
+}
+
 async function upsertPhaseRules(client: PoolClient, phaseId: string, rules: any[]) {
   await client.query("delete from public.competition_phase_rules where phase_id = $1", [phaseId]);
   for (const rule of rules) {

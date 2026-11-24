@@ -118,6 +118,7 @@ import {
   addClubToCompetition,
   addTeamsToCompetition,
   advanceKnockoutPhase,
+  maybeAutoAdvanceKnockout,
   assignCompetitionGroups,
   cloneCompetitionTeams,
   configureCompetition,
@@ -1026,7 +1027,9 @@ const server = http.createServer(async (req, res) => {
     const adminMatchStatusMatch = url.pathname.match(/^\/admin\/matches\/([^/]+)\/status$/);
     if (adminMatchStatusMatch && req.method === "PATCH") {
       requireAdmin(sessionUser);
-      sendJson(res, 200, { ok: true, data: await setMatchStatus(adminMatchStatusMatch[1], await readJson(req), sessionUser) });
+      const updated = await setMatchStatus(adminMatchStatusMatch[1], await readJson(req), sessionUser);
+      await maybeAutoAdvanceKnockout(updated, sessionUser);
+      sendJson(res, 200, { ok: true, data: updated });
       return;
     }
 
@@ -1054,7 +1057,9 @@ const server = http.createServer(async (req, res) => {
     const adminMatchUpdateMatch = url.pathname.match(/^\/admin\/matches\/([^/]+)$/);
     if (adminMatchUpdateMatch && req.method === "PATCH") {
       requireAdmin(sessionUser);
-      sendJson(res, 200, { ok: true, data: await updateMatch(adminMatchUpdateMatch[1], await readJson(req), sessionUser) });
+      const updated = await updateMatch(adminMatchUpdateMatch[1], await readJson(req), sessionUser);
+      await maybeAutoAdvanceKnockout(updated, sessionUser);
+      sendJson(res, 200, { ok: true, data: updated });
       return;
     }
 

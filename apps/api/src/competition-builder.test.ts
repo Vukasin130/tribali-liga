@@ -5,6 +5,7 @@ import {
   advanceKnockoutPhase,
   configureCompetition,
   generateCompetitionSchedule,
+  maybeAutoAdvanceKnockout,
   prepareKnockoutPhase,
   resumeCompetitionSchedule
 } from "./competition-builder.ts";
@@ -434,6 +435,109 @@ describe("advanceKnockoutPhase", () => {
           return true;
         }
       );
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+// Real incident this exists for: an admin's hope (reasonably) was that once a knockout
+// round finished, the next one would just appear - manually tapping "advance" after every
+// single round was never the intent, it was just the only thing that existed.
+describe("maybeAutoAdvanceKnockout", () => {
+  async function setupSemifinalInProgress(tracker: ReturnType<typeof newFixtureTracker>) {
+    const competitionId = await createTestCompetition(tracker);
+    await configureCompetition(
+      competitionId,
+      {
+        formatType: "league",
+        phases: [
+          { code: "regular", name: "Regularni deo", type: "league", sequence: 1, legs: 1 },
+          { code: "knockout", name: "Nokaut faza", type: "knockout", sequence: 2, legs: 1 }
+        ]
+      },
+      testActor
+    );
+    const teamIds: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      teamIds.push(await createTestTeam(tracker, competitionId, `__test__ team${i}`));
+    }
+    const seedMatch = await createTestMatch(tracker, competitionId, teamIds[0], teamIds[1], new Date(), {
+      status: "finished",
+      homeScore: 2,
+      awayScore: 1
+    });
+    await query("update public.matches set round = 9 where id = $1", [seedMatch]);
+    await transaction((client) => recalculateCompetitionStandings(client, competitionId));
+    await prepareKnockoutPhase(competitionId, { phaseCode: "knockout", qualifiersCount: 4, includeThirdPlace: false }, testActor);
+    const semifinal = await query<{ id: string }>(
+      "select id from public.matches where competition_id = $1 and phase = 'knockout' order by created_at",
+      [competitionId]
+    );
+    return { competitionId, semifinalMatchIds: semifinal.rows.map((row) => row.id) };
+  }
+
+  test("does nothing for a finished match that isn't part of a knockout phase", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const homeTeamId = await createTestTeam(tracker, competitionId, "__test__ home");
+      const awayTeamId = await createTestTeam(tracker, competitionId, "__test__ away");
+      const matchId = await createTestMatch(tracker, competitionId, homeTeamId, awayTeamId, new Date(), {
+        status: "finished",
+        homeScore: 2,
+        awayScore: 1
+      });
+      const detail = await setMatchStatusDb(matchId, { status: "finished", homeScore: 2, awayScore: 1 }, testActor);
+      // Must not throw, and must not create anything - there's no knockout phase at all.
+      await maybeAutoAdvanceKnockout(detail, testActor);
+      const anyKnockoutMatches = await query("select id from public.matches where competition_id = $1 and phase = 'knockout'", [
+        competitionId
+      ]);
+      assert.equal(anyKnockoutMatches.rowCount, 0);
+    } finally {
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("waits for every match in the round before creating the next one", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, semifinalMatchIds } = await setupSemifinalInProgress(tracker);
+      assert.equal(semifinalMatchIds.length, 2);
+
+      const firstDetail = await setMatchStatusDb(semifinalMatchIds[0], { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
+      await maybeAutoAdvanceKnockout(firstDetail, testActor);
+
+      const afterFirst = await query("select id from public.matches where competition_id = $1 and phase = 'knockout'", [competitionId]);
+      assert.equal(afterFirst.rowCount, 2, "no next round yet - the other semifinal hasn't been played");
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+
+  test("creates the final and the third-place match the moment the last semifinal finishes", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const { competitionId, semifinalMatchIds } = await setupSemifinalInProgress(tracker);
+
+      const firstDetail = await setMatchStatusDb(semifinalMatchIds[0], { status: "finished", homeScore: 2, awayScore: 0 }, testActor);
+      await maybeAutoAdvanceKnockout(firstDetail, testActor);
+      const secondDetail = await setMatchStatusDb(semifinalMatchIds[1], { status: "finished", homeScore: 1, awayScore: 0 }, testActor);
+      await maybeAutoAdvanceKnockout(secondDetail, testActor);
+
+      const finalMatches = await query<{ phase: string }>(
+        `select phase from public.matches
+         where competition_id = $1 and phase in ('knockout', 'third_place') and id <> all($2::uuid[])`,
+        [competitionId, semifinalMatchIds]
+      );
+      assert.equal(finalMatches.rowCount, 2, "expected exactly a final and a third-place match");
+      assert.ok(finalMatches.rows.some((row) => row.phase === "knockout"), "expected a final");
+      assert.ok(finalMatches.rows.some((row) => row.phase === "third_place"), "expected a third-place match");
     } finally {
       await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
       await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
