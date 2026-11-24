@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "../components/ui";
 import { StandingsTable } from "../components/StandingsTable";
+import { KnockoutBracket } from "../components/KnockoutBracket";
 import { FixtureCard } from "../components/FixtureCard";
 import { SponsorStrip } from "../components/SponsorStrip";
 import { colors } from "../theme/colors";
@@ -61,6 +62,7 @@ export function SeasonsScreen() {
     roundLabel,
     roundDayGroups,
     unroundedDayGroups,
+    knockoutMatches,
     error,
     modals
   } = useSeasonsScreenState();
@@ -357,6 +359,11 @@ export function SeasonsScreen() {
                   </View>
                 ) : null}
               </>
+            ) : knockoutMatches.length > 0 ? (
+              <View style={styles.section}>
+                <SectionTitle title="Nokaut faza" />
+                <KnockoutBracket matches={knockoutMatches} onOpenMatch={setActiveMatchId} onOpenTeam={setActiveTeamId} />
+              </View>
             ) : (
               <View style={styles.section}>
                 {(hub?.standings ?? []).length === 0 ? <EmptyState message="Tabela jos nije dostupna." /> : null}

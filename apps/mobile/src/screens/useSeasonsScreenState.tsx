@@ -41,6 +41,23 @@ function dayTitle(value: string): string {
   return date.toLocaleDateString("sr-RS", { weekday: "short", day: "2-digit", month: "short" });
 }
 
+// A knockout round's real identity is the stage it represents, not whatever round
+// number it happens to be anchored at (see competition-builder.ts's knockoutRoundNumber) -
+// "Kolo 15" means nothing to a fan, "Polufinale" does. The stage is fully determined by
+// how many matches are actually in that round: a single-elimination bracket always halves,
+// so match count maps 1:1 onto a stage name regardless of how many teams the whole
+// competition started with.
+const KNOCKOUT_STAGE_LABELS: Record<number, string> = {
+  1: "Finale",
+  2: "Polufinale",
+  4: "Cetvrtfinale",
+  8: "Osmina finala",
+  16: "1/16 finala"
+};
+export function knockoutStageLabel(knockoutMatchCount: number): string {
+  return KNOCKOUT_STAGE_LABELS[knockoutMatchCount] || "Nokaut runda";
+}
+
 export function groupMatchesByDay(matches: MatchSummary[]): { key: string; title: string; matches: MatchSummary[] }[] {
   const groups = new Map<string, { key: string; title: string; matches: MatchSummary[] }>();
   matches.forEach((match) => {
@@ -316,9 +333,23 @@ export function useSeasonsScreenState() {
   const roundMatches = (roundNumbers.length ? allMatches.filter((match) => match.round === activeRound) : allMatches).sort(
     (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
   );
-  const roundLabel = roundMatches[0]?.gameweekName || (activeRound !== undefined ? `Kolo ${activeRound}` : "Utakmice");
+  // A round that's reached the knockout phase names itself after the stage it actually is
+  // (semifinal, final...) rather than a round number nobody can map to anything - the
+  // third-place match shares its round with the final (see competition-builder.ts) but
+  // isn't itself part of the bracket, so it's excluded from the count that decides the stage.
+  const roundKnockoutMatches = roundMatches.filter((match) => match.phase === "knockout");
+  const roundLabel = roundKnockoutMatches.length
+    ? knockoutStageLabel(roundKnockoutMatches.length)
+    : roundMatches[0]?.gameweekName || (activeRound !== undefined ? `Kolo ${activeRound}` : "Utakmice");
   const roundDayGroups = groupMatchesByDay(roundMatches);
   const unroundedDayGroups = groupMatchesByDay(unroundedMatches);
+
+  // Every knockout/third-place match across the whole competition, oldest stage first -
+  // the bracket view renders straight from this instead of the regular standings table
+  // once the knockout phase has actually begun.
+  const knockoutMatches = allMatches
+    .filter((match) => match.phase === "knockout" || match.phase === "third_place")
+    .sort((a, b) => (a.round ?? 0) - (b.round ?? 0) || new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
 
   // Shared by both the mobile and desktop layouts, unchanged either way.
   const modals = (
@@ -462,6 +493,7 @@ export function useSeasonsScreenState() {
     roundLabel,
     roundDayGroups,
     unroundedDayGroups,
+    knockoutMatches,
     modals
   };
 }
