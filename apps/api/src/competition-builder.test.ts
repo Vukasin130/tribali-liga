@@ -318,6 +318,81 @@ describe("prepareKnockoutPhase", () => {
     }
   });
 
+  test("with qualifiersPerGroup + wildcardCount, only the single best runner-up across groups joins the group winners", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      await configureCompetition(
+        competitionId,
+        {
+          formatType: "tournament",
+          phases: [
+            { code: "group", name: "Grupna faza", type: "group", sequence: 1, legs: 1 },
+            { code: "knockout", name: "Nokaut faza", type: "knockout", sequence: 2, legs: 1 }
+          ]
+        },
+        testActor
+      );
+
+      async function setupGroup(groupName: string, scoreForSecondPlace: [number, number]) {
+        const first = await createTestTeam(tracker, competitionId, `__test__ ${groupName} 1st`);
+        const second = await createTestTeam(tracker, competitionId, `__test__ ${groupName} 2nd`);
+        const third = await createTestTeam(tracker, competitionId, `__test__ ${groupName} 3rd`);
+        await query("update public.teams set group_name = $2 where id = any($1::uuid[])", [[first, second, third], groupName]);
+
+        const matchIds = [
+          await createTestMatch(tracker, competitionId, first, second, new Date(), { status: "finished", homeScore: 2, awayScore: 0 }),
+          await createTestMatch(tracker, competitionId, first, third, new Date(), { status: "finished", homeScore: 2, awayScore: 0 }),
+          await createTestMatch(tracker, competitionId, second, third, new Date(), {
+            status: "finished",
+            homeScore: scoreForSecondPlace[0],
+            awayScore: scoreForSecondPlace[1]
+          })
+        ];
+        for (const matchId of matchIds) {
+          await query("update public.matches set group_name = $2 where id = $1", [matchId, groupName]);
+        }
+        return { first, second, third };
+      }
+
+      // Groups A and B are identical on points and goal difference for 2nd place (3 pts,
+      // -1 GD) - only fouls can separate them. Group C's 2nd place is well behind on
+      // points alone, so it must never be picked no matter its fouls.
+      const groupA = await setupGroup("Grupa A", [1, 0]);
+      const groupB = await setupGroup("Grupa B", [1, 0]);
+      const groupC = await setupGroup("Grupa C", [0, 0]);
+
+      await transaction((client) => recalculateCompetitionStandings(client, competitionId));
+
+      // Group A's runner-up committed fewer fouls than Group B's - it should be the one
+      // wildcard slot picks, even though they're dead level on points and goal difference.
+      await query(
+        `insert into public.player_season_stats (competition_id, team_id, fouls) values ($1, $2, 2), ($1, $3, 5)`,
+        [competitionId, groupA.second, groupB.second]
+      );
+
+      const result = await prepareKnockoutPhase(
+        competitionId,
+        { phaseCode: "knockout", qualifiersPerGroup: 1, wildcardCount: 1, includeThirdPlace: false },
+        testActor
+      );
+
+      assert.equal(result.qualifiers.length, 4);
+      const qualifierIds = new Set(result.qualifiers.map((q) => q.teamId));
+      assert.ok(qualifierIds.has(groupA.first), "Group A winner should qualify");
+      assert.ok(qualifierIds.has(groupB.first), "Group B winner should qualify");
+      assert.ok(qualifierIds.has(groupC.first), "Group C winner should qualify");
+      assert.ok(qualifierIds.has(groupA.second), "Group A's runner-up (fewer fouls) should take the wildcard slot");
+      assert.ok(!qualifierIds.has(groupB.second), "Group B's runner-up (more fouls, same points/GD) should NOT qualify");
+      assert.ok(!qualifierIds.has(groupC.second), "Group C's runner-up (fewer points) should NOT qualify");
+    } finally {
+      await query("delete from public.player_season_stats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+
   test("rejects when fewer than 2 teams qualify", async () => {
     const tracker = newFixtureTracker();
     try {

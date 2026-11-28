@@ -859,6 +859,8 @@ function buildOneRound(
 export async function prepareKnockoutPhase(competitionId: string, payload: any, actor: Actor) {
   const phaseCode = String(payload.phaseCode || "knockout").trim();
   const qualifiersCount = integerOrNull(payload.qualifiersCount) || integerOrNull(payload.teamsCount) || 8;
+  const qualifiersPerGroup = integerOrNull(payload.qualifiersPerGroup);
+  const wildcardCount = integerOrNull(payload.wildcardCount) || 0;
   const includeThirdPlace = payload.includeThirdPlace !== false;
   const startAt = payload.startAt || new Date().toISOString();
   const intervalMinutes = integerOrNull(payload.intervalMinutes) || 60;
@@ -866,7 +868,13 @@ export async function prepareKnockoutPhase(competitionId: string, payload: any, 
 
   const result = await transaction(async (client) => {
     const phase = await getPhaseByCode(client, competitionId, phaseCode);
-    const qualifiers = await selectQualifiers(client, competitionId, qualifiersCount);
+    // qualifiersPerGroup is only ever set by a caller that wants the "best runner-up(s)"
+    // exception (e.g. Tribali Superkup: group winner from each group, plus the single
+    // best second-placed team across every group) - every other caller keeps using the
+    // plain group-leaders-first cursor below, unchanged.
+    const qualifiers = qualifiersPerGroup
+      ? await selectQualifiersWithWildcards(client, competitionId, qualifiersPerGroup, wildcardCount)
+      : await selectQualifiers(client, competitionId, qualifiersCount);
     if (qualifiers.length < 2) throw httpError(400, "Nema dovoljno ekipa za nokaut fazu.");
     const regularSeasonMaxRound = await getRegularSeasonMaxRound(client, competitionId);
 
@@ -1244,6 +1252,62 @@ async function selectQualifiers(client: PoolClient, competitionId: string, count
     }
     cursor += 1;
   }
+  return qualifiers;
+}
+
+// Group winner(s) from every group qualify automatically; beyond that, instead of also
+// taking the next-best team from every single group (selectQualifiers' plain cursor),
+// only the single best runner-up ACROSS all groups goes through - ranked the same way
+// team_standings itself is ordered (points, then goal difference), falling through to
+// fewest fouls when even that ties, since fouls aren't part of team_standings at all.
+async function selectQualifiersWithWildcards(
+  client: PoolClient,
+  competitionId: string,
+  qualifiersPerGroup: number,
+  wildcardCount: number
+) {
+  const standings = await client.query(
+    `select s.*, t.name as team_name
+     from public.team_standings s
+     left join public.teams t on t.id = s.team_id
+     where s.competition_id = $1
+     order by coalesce(s.group_name, ''), coalesce(s.position, 999)`,
+    [competitionId]
+  );
+
+  const fouls = await client.query(
+    `select team_id, coalesce(sum(fouls), 0)::int as fouls
+     from public.player_season_stats
+     where competition_id = $1
+     group by team_id`,
+    [competitionId]
+  );
+  const foulsByTeam = new Map(fouls.rows.map((row) => [row.team_id, Number(row.fouls)]));
+
+  const grouped = new Map<string, any[]>();
+  for (const row of standings.rows) {
+    const group = row.group_name || "Tabela";
+    if (!grouped.has(group)) grouped.set(group, []);
+    grouped.get(group)!.push(row);
+  }
+
+  const qualifiers: any[] = [];
+  const wildcardCandidates: any[] = [];
+  for (const groupRows of grouped.values()) {
+    for (let index = 0; index < qualifiersPerGroup && groupRows[index]; index += 1) {
+      qualifiers.push(groupRows[index]);
+    }
+    if (groupRows[qualifiersPerGroup]) wildcardCandidates.push(groupRows[qualifiersPerGroup]);
+  }
+
+  wildcardCandidates.sort(
+    (a, b) =>
+      b.points - a.points ||
+      b.goal_difference - a.goal_difference ||
+      (foulsByTeam.get(a.team_id) || 0) - (foulsByTeam.get(b.team_id) || 0)
+  );
+  qualifiers.push(...wildcardCandidates.slice(0, wildcardCount));
+
   return qualifiers;
 }
 
