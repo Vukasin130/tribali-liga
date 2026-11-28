@@ -494,6 +494,7 @@ interface GenerateSchedulePayload {
   intervalMinutes?: number;
   startAt?: string;
   venue?: string;
+  singleDay?: boolean;
 }
 
 export async function generateCompetitionSchedule(competitionId: string, payload: GenerateSchedulePayload, actor: Actor) {
@@ -503,6 +504,7 @@ export async function generateCompetitionSchedule(competitionId: string, payload
   const intervalMinutes = integerOrNull(payload.intervalMinutes) || 60;
   const startAt = payload.startAt || new Date().toISOString();
   const venue = String(payload.venue || "").trim();
+  const singleDay = payload.singleDay === true;
 
   const result = await transaction(async (client) => {
     const phase = await getPhaseByCode(client, competitionId, phaseCode);
@@ -517,7 +519,13 @@ export async function generateCompetitionSchedule(competitionId: string, payload
       );
     }
 
-    const pairings = buildRoundRobin(teams, legs);
+    // A one-day cup (e.g. a group-stage Superkup) has no real notion of "round" at all -
+    // every pairing is meant to land on the same calendar day, one after another, rather
+    // than roundAnchorDate spacing each round a week apart. Folding every pairing onto
+    // round 1 here (after buildRoundRobin's own round-then-group ordering, which it keeps)
+    // makes loadUsableSlots anchor them all to the same day and simply walk intervalMinutes
+    // forward for each one in turn.
+    const pairings = buildRoundRobin(teams, legs).map((pairing) => (singleDay ? { ...pairing, round: 1 } : pairing));
     const slots = await loadUsableSlots(client, competitionId, pairings.length, startAt, intervalMinutes, venue, pairings);
     const matches = [];
 

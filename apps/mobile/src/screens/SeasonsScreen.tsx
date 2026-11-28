@@ -2,7 +2,7 @@ import React from "react";
 import { Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { Card, EmptyState, ErrorState, LoadingState, SectionTitle } from "../components/ui";
+import { Card, EmptyState, ErrorState, LoadingState, Pill, SectionTitle } from "../components/ui";
 import { StandingsTable } from "../components/StandingsTable";
 import { KnockoutBracket } from "../components/KnockoutBracket";
 import { FixtureCard } from "../components/FixtureCard";
@@ -78,8 +78,17 @@ export function SeasonsScreen() {
           style={styles.hero}
         >
           <TouchableOpacity style={styles.leagueToggle} onPress={() => setPickerOpen(true)}>
-            <View>
-              <Text style={styles.leagueToggleLabel}>Aktivne lige</Text>
+            <View style={styles.leagueToggleTextGroup}>
+              <View style={styles.leagueToggleLabelRow}>
+                <Text style={styles.leagueToggleLabel}>Liga</Text>
+                {hub?.activeCompetition ? (
+                  <Pill
+                    label={leagueStatusLabel(hub.activeCompetition.status)}
+                    tone={leagueStatusTone(hub.activeCompetition.status)}
+                    style={styles.leagueTogglePill}
+                  />
+                ) : null}
+              </View>
               <Text style={styles.leagueToggleValue}>{hub?.activeCompetition?.name ?? "Izaberi ligu"}</Text>
             </View>
             <Text style={styles.leagueToggleChevron}>⌄</Text>
@@ -392,19 +401,27 @@ export function SeasonsScreen() {
             <View style={styles.modalSheet}>
               <Text style={styles.modalTitle}>Izaberi ligu</Text>
               <ScrollView>
-                {competitions.map((competition) => (
-                  <TouchableOpacity
-                    key={competition.id}
-                    style={styles.modalOption}
-                    onPress={() => {
-                      setCompetitionId(competition.id);
-                      setPickerOpen(false);
-                    }}
-                  >
-                    <Text style={styles.modalOptionCity}>{competition.cityName}</Text>
-                    <Text style={styles.modalOptionName}>{competition.name}</Text>
-                  </TouchableOpacity>
-                ))}
+                {competitions.map((competition) => {
+                  const finished = competition.status === "finished";
+                  return (
+                    <TouchableOpacity
+                      key={competition.id}
+                      style={styles.modalOption}
+                      onPress={() => {
+                        setCompetitionId(competition.id);
+                        setPickerOpen(false);
+                      }}
+                    >
+                      <View style={styles.modalOptionTextGroup}>
+                        <Text style={styles.modalOptionCity}>{competition.cityName}</Text>
+                        <Text style={[styles.modalOptionName, finished ? styles.modalOptionNameFinished : null]}>
+                          {competition.name}
+                        </Text>
+                      </View>
+                      <Pill label={leagueStatusLabel(competition.status)} tone={leagueStatusTone(competition.status)} />
+                    </TouchableOpacity>
+                  );
+                })}
               </ScrollView>
             </View>
           </TouchableOpacity>
@@ -413,6 +430,16 @@ export function SeasonsScreen() {
       {modals}
     </>
   );
+}
+
+function leagueStatusLabel(status?: string): string {
+  if (status === "finished") return "Zavrsena";
+  if (status === "active") return "Aktivna";
+  return "Priprema";
+}
+
+function leagueStatusTone(status?: string): "success" | "neutral" {
+  return status === "active" ? "success" : "neutral";
 }
 
 const styles = StyleSheet.create({
@@ -434,7 +461,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 14
   },
+  leagueToggleTextGroup: { flex: 1 },
+  leagueToggleLabelRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   leagueToggleLabel: { color: "rgba(255,255,255,0.7)", fontSize: 11, fontWeight: "700", textTransform: "uppercase" },
+  leagueTogglePill: { paddingVertical: 2, paddingHorizontal: 8 },
   leagueToggleValue: { color: "#fff", fontSize: 16, fontWeight: "700", marginTop: 2 },
   leagueToggleChevron: { color: "#fff", fontSize: 18 },
   heroTitle: { color: "#fff", fontSize: 28, fontWeight: "700" },
@@ -569,7 +599,17 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: "rgba(10,10,10,0.5)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: "#fff", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: "70%" },
   modalTitle: { fontSize: 18, fontWeight: "700", color: colors.textPrimary, marginBottom: 12 },
-  modalOption: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.line },
+  modalOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line
+  },
+  modalOptionTextGroup: { flex: 1 },
   modalOptionCity: { color: colors.textMuted, fontSize: 12, fontWeight: "600" },
-  modalOptionName: { color: colors.textPrimary, fontSize: 16, fontWeight: "700" }
+  modalOptionName: { color: colors.textPrimary, fontSize: 16, fontWeight: "700" },
+  modalOptionNameFinished: { color: colors.textMuted }
 });

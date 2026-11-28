@@ -58,6 +58,50 @@ describe("generateCompetitionSchedule", () => {
       await cleanupTestData(tracker);
     }
   });
+
+  test("with singleDay, every group's matches land on the same calendar day instead of a week apart", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const teamIds: string[] = [];
+      for (let i = 0; i < 9; i += 1) {
+        teamIds.push(await createTestTeam(tracker, competitionId, `__test__ team${i}`));
+      }
+      await query("update public.teams set group_name = $2 where id = any($1::uuid[])", [teamIds.slice(0, 3), "Grupa A"]);
+      await query("update public.teams set group_name = $2 where id = any($1::uuid[])", [teamIds.slice(3, 6), "Grupa B"]);
+      await query("update public.teams set group_name = $2 where id = any($1::uuid[])", [teamIds.slice(6, 9), "Grupa C"]);
+      await configureCompetition(
+        competitionId,
+        {
+          formatType: "tournament",
+          phases: [{ code: "group", name: "Grupna faza", type: "group", sequence: 1, legs: 1 }]
+        },
+        testActor
+      );
+
+      // roundAnchorDate always pins the anchor to 18:00 regardless of startAt's own time of
+      // day - intervalMinutes has to be tight enough that 9 matches still fit before midnight.
+      const startAt = new Date(2026, 11, 5, 18, 0, 0).toISOString();
+      const generated = await generateCompetitionSchedule(
+        competitionId,
+        { phaseCode: "group", legs: 1, startAt, intervalMinutes: 30, singleDay: true },
+        testActor
+      );
+
+      assert.equal(generated.length, 9); // 3 matches per group x 3 groups
+      for (const match of generated) {
+        const scheduled = new Date(match.scheduledAt);
+        assert.equal(scheduled.getFullYear(), 2026);
+        assert.equal(scheduled.getMonth(), 11); // December
+        assert.equal(scheduled.getDate(), 5, `expected every match on the 5th, got ${match.scheduledAt}`);
+        assert.equal(match.round, 1);
+      }
+    } finally {
+      await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
 });
 
 describe("resumeCompetitionSchedule", () => {
