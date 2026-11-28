@@ -1,8 +1,10 @@
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  addClubToCompetition,
   addReturnLeg,
   advanceKnockoutPhase,
+  assignCompetitionGroups,
   configureCompetition,
   generateCompetitionSchedule,
   maybeAutoAdvanceKnockout,
@@ -660,6 +662,70 @@ describe("maybeAutoAdvanceKnockout", () => {
     } finally {
       await query("delete from public.competition_phases where competition_id = any($1::uuid[])", [tracker.competitionIds]);
       await query("delete from public.competition_formats where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+describe("addClubToCompetition", () => {
+  test("seeds a 0-played team_standings row with the right group immediately, before any match is played", async () => {
+    const tracker = newFixtureTracker();
+    const clubIds: string[] = [];
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const club = await query<{ id: string }>(
+        `insert into public.clubs (name) values ('__test__ club') returning id`
+      );
+      const clubId = club.rows[0].id;
+      clubIds.push(clubId);
+
+      const { team } = await addClubToCompetition(
+        competitionId,
+        { clubId, includePlayers: false, groupName: "Grupa A" },
+        testActor
+      );
+
+      const standings = await query(
+        "select group_name, played, team_id from public.team_standings where competition_id = $1",
+        [competitionId]
+      );
+      assert.equal(standings.rowCount, 1);
+      assert.equal(standings.rows[0].team_id, team.id);
+      assert.equal(standings.rows[0].group_name, "Grupa A");
+      assert.equal(standings.rows[0].played, 0);
+    } finally {
+      await query("delete from public.team_standings where competition_id = any($1::uuid[])", [tracker.competitionIds]);
+      await query("delete from public.clubs where id = any($1::uuid[])", [clubIds]);
+      await cleanupTestData(tracker);
+    }
+  });
+});
+
+describe("assignCompetitionGroups", () => {
+  test("seeds a 0-played team_standings row per team with its new group, before any match is played", async () => {
+    const tracker = newFixtureTracker();
+    try {
+      const competitionId = await createTestCompetition(tracker);
+      const teamA = await createTestTeam(tracker, competitionId, "__test__ team A");
+      const teamB = await createTestTeam(tracker, competitionId, "__test__ team B");
+
+      await assignCompetitionGroups(
+        competitionId,
+        { groupNames: ["Grupa A", "Grupa B"], seeds: [teamA, teamB] },
+        testActor
+      );
+
+      const standings = await query(
+        "select team_id, group_name, played from public.team_standings where competition_id = $1 order by group_name",
+        [competitionId]
+      );
+      assert.equal(standings.rowCount, 2);
+      assert.equal(standings.rows[0].group_name, "Grupa A");
+      assert.equal(standings.rows[0].team_id, teamA);
+      assert.equal(standings.rows[1].group_name, "Grupa B");
+      assert.equal(standings.rows[1].team_id, teamB);
+    } finally {
+      await query("delete from public.team_standings where competition_id = any($1::uuid[])", [tracker.competitionIds]);
       await cleanupTestData(tracker);
     }
   });

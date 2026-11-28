@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { query, transaction } from "./db.ts";
+import { recalculateCompetitionStandings } from "./matches-db.ts";
 import { syncFantasyPlayerPool } from "./season-hub.ts";
 import { httpError } from "./errors.ts";
 import { requiredText } from "./validation.ts";
@@ -396,6 +397,12 @@ export async function addClubToCompetition(competitionId: string, payload: { clu
       playersCount
     });
 
+    // Without this, a team added here (unlike createTeam in sports-data.ts, which already
+    // does this) has no team_standings row at all until its first match finishes - the
+    // Tabela screen renders nothing, not even a 0-played group header, for a brand-new
+    // competition like a group-stage cup where every team is added this way.
+    await recalculateCompetitionStandings(client, competitionId);
+
     return { team: newTeam, playersCount };
   });
 
@@ -446,6 +453,11 @@ export async function assignCompetitionGroups(competitionId: string, payload: { 
     await auditWithClient(client, actor, "competition.groups.assign", "competition", competitionId, {
       groups: groupNames
     });
+
+    // Standings rows are keyed by (team, group_name) - moving a team into its real group
+    // here leaves any earlier row (seeded with no group, or a different one) stale/orphaned
+    // unless this recomputes them right away, same reasoning as addClubToCompetition above.
+    await recalculateCompetitionStandings(client, competitionId);
     return updates;
   });
 
