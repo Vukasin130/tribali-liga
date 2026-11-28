@@ -27,6 +27,7 @@ export function LeagueComposerModal({
   const [addingCity, setAddingCity] = useState(false);
   const [name, setName] = useState(editingCompetition?.name || "");
   const [seasonName, setSeasonName] = useState(editingCompetition?.seasonName || "");
+  const [status, setStatus] = useState(editingCompetition?.status || "active");
   const [format, setFormat] = useState<FormatType>("league");
   const [groupCount, setGroupCount] = useState("2");
   const [qualifiersPerGroup, setQualifiersPerGroup] = useState("2");
@@ -77,7 +78,8 @@ export function LeagueComposerModal({
         const competition = await updateCompetition(editingCompetition.id, {
           cityId: cityId || undefined,
           name: name.trim(),
-          seasonName: seasonName.trim()
+          seasonName: seasonName.trim(),
+          status
         });
         onSaved(competition);
         return;
@@ -185,6 +187,26 @@ export function LeagueComposerModal({
             value={seasonName}
             onChangeText={setSeasonName}
           />
+
+          {isEditing ? (
+            <View style={styles.field}>
+              <Text style={styles.label}>Status lige</Text>
+              <View style={styles.chipsRow}>
+                <TouchableOpacity
+                  style={[styles.chip, status === "active" ? styles.chipActive : null]}
+                  onPress={() => setStatus("active")}
+                >
+                  <Text style={[styles.chipText, status === "active" ? styles.chipTextActive : null]}>Aktivna</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.chip, status === "finished" ? styles.chipActive : null]}
+                  onPress={() => setStatus("finished")}
+                >
+                  <Text style={[styles.chipText, status === "finished" ? styles.chipTextActive : null]}>Zavrsena</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
           {!isEditing ? (
             <View style={styles.field}>
